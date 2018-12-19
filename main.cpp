@@ -3,6 +3,11 @@
 
 using namespace llvm;
 
+static int foobar(int a, int b)
+{
+	return a * b;
+}
+
 int main()
 {
 	Jitter::init_global();
@@ -16,16 +21,22 @@ int main()
 	auto *func = Function::Create(function_type, Function::ExternalLinkage,
 	                              "test", test.get());
 
+	auto *ext = Function::Create(function_type, Function::ExternalLinkage,
+	                             "ext", test.get());
+
 	auto *bb = BasicBlock::Create(ctx, "entry", func);
 	builder.SetInsertPoint(bb);
 
 	Value *lhs = &func->args().begin()[0];
 	Value *rhs = &func->args().begin()[1];
 
-	auto *tmp = builder.CreateAdd(lhs, rhs);
+	std::vector<Value *> args{ lhs, rhs };
+	auto *tmp = builder.CreateCall(ext, args, "ext");
 	builder.CreateRet(tmp);
 
 	verifyFunction(*func, &errs());
+
+	jitter.add_external_symbol("ext", foobar);
 
 	jitter.add_module(std::move(test));
 	auto ptr = (int (*)(int, int))jitter.get_symbol_address("test");

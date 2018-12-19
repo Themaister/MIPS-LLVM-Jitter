@@ -39,6 +39,11 @@ IRBuilder<> Jitter::create_builder()
 	return IRBuilder<>(*context);
 }
 
+void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbol)
+{
+	externals[name] = symbol;
+}
+
 Jitter::Jitter()
 {
 	context = std::make_unique<LLVMContext>();
@@ -50,7 +55,10 @@ Jitter::Jitter()
 	resources.Resolver = createLegacyLookupResolver(
 		*execution_session,
 		[this](const std::string &name) -> JITSymbol {
-			if (auto sym = compile_layer->findSymbol(name, false))
+			auto itr = externals.find(name);
+			if (itr != std::end(externals))
+				return JITSymbol(itr->second, JITSymbolFlags::Exported);
+			else if (auto sym = compile_layer->findSymbol(name, false))
 				return sym;
 			else if (auto sym_addr = RTDyldMemoryManager::getSymbolAddressInProcess(name))
 				return JITSymbol(sym_addr, JITSymbolFlags::Exported);

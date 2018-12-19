@@ -11,6 +11,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include <memory>
+#include <unordered_map>
 
 class Jitter
 {
@@ -31,6 +32,14 @@ public:
 	std::unique_ptr<llvm::Module> create_module(const std::string &name);
 	llvm::IRBuilder<> create_builder();
 
+	template <typename T>
+	void add_external_symbol(const std::string &name, T sym)
+	{
+		add_external_symbol_generic(name, (uint64_t)sym);
+	}
+
+	void add_external_symbol_generic(const std::string &name, uint64_t symbol);
+
 private:
 	std::unique_ptr<llvm::LLVMContext> context;
 	std::unique_ptr<llvm::orc::ExecutionSession> execution_session;
@@ -44,5 +53,6 @@ private:
 	std::unique_ptr<llvm::TargetMachine> target_machine;
 	std::unique_ptr<llvm::DataLayout> data_layout;
 	std::unique_ptr<llvm::orc::MangleAndInterner> mangle_and_interner;
+	std::unordered_map<std::string, uint64_t> externals;
 };
 
