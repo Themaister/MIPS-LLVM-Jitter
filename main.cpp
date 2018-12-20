@@ -3,11 +3,6 @@
 
 using namespace llvm;
 
-static int foobar(int a, int b)
-{
-	return a * b;
-}
-
 int main()
 {
 	Jitter::init_global();
@@ -16,30 +11,31 @@ int main()
 	auto test = jitter.create_module("test");
 	auto builder = jitter.create_builder();
 
-	std::vector<Type *> types{ Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
-	auto *function_type = FunctionType::get(Type::getInt32Ty(ctx), types, false);
-	auto *func = Function::Create(function_type, Function::ExternalLinkage,
-	                              "test", test.get());
+	auto *vec = VectorType::get(Type::getFloatTy(ctx), 8);
+	auto *vecptr = PointerType::get(vec, 0);
+	Type *arg_types[] = { vecptr };
 
-	auto *ext = Function::Create(function_type, Function::ExternalLinkage,
-	                             "ext", test.get());
+	auto *function_type = FunctionType::get(Type::getVoidTy(ctx), arg_types, false);
+	auto *func = Function::Create(function_type, Function::ExternalLinkage, "test", test.get());
 
 	auto *bb = BasicBlock::Create(ctx, "entry", func);
 	builder.SetInsertPoint(bb);
 
-	Value *lhs = &func->args().begin()[0];
-	Value *rhs = &func->args().begin()[1];
+	Value *arg = &func->args().begin()[0];
 
-	std::vector<Value *> args{ lhs, rhs };
-	auto *tmp = builder.CreateCall(ext, args, "ext");
-	builder.CreateRet(tmp);
+	auto *loaded = builder.CreateAlignedLoad(arg, 8, "loaded");
+	auto *added = builder.CreateFAdd(loaded, loaded);
+	auto *cvec = ConstantVector::getSplat(8, ConstantFP::get(Type::getFloatTy(ctx), 40.0f));
+	added = builder.CreateFMul(added, cvec);
+	builder.CreateAlignedStore(added, arg, 8);
+	builder.CreateRetVoid();
 
 	verifyFunction(*func, &errs());
 
-	jitter.add_external_symbol("ext", foobar);
-
 	jitter.add_module(std::move(test));
-	auto ptr = (int (*)(int, int))jitter.get_symbol_address("test");
-	int r = ptr(90, 40);
+	auto ptr = (void (*)(float *))jitter.get_symbol_address("test");
+
+	float blocks[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	ptr(blocks);
 	;
 }
