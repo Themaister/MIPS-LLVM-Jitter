@@ -23,11 +23,11 @@ int main()
 
 	Value *arg = &func->args().begin()[0];
 
-	auto *loaded = builder.CreateAlignedLoad(arg, 8, "loaded");
+	auto *loaded = builder.CreateAlignedLoad(arg, 4, "loaded");
 	auto *added = builder.CreateFAdd(loaded, loaded);
 	auto *cvec = ConstantVector::getSplat(8, ConstantFP::get(Type::getFloatTy(ctx), 40.0f));
 	added = builder.CreateFMul(added, cvec);
-	builder.CreateAlignedStore(added, arg, 8);
+	builder.CreateAlignedStore(added, arg, 4);
 	builder.CreateRetVoid();
 
 	verifyFunction(*func, &errs());

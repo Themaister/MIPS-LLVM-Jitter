@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
@@ -35,12 +36,13 @@ public:
 	void add_external_symbol_generic(const std::string &name, uint64_t symbol);
 
 private:
-	std::unique_ptr<llvm::LLVMContext> context;
+	llvm::orc::ThreadSafeContext context;
 	std::unique_ptr<llvm::orc::ExecutionSession> execution_session;
 	std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_layer;
 	std::unique_ptr<llvm::orc::IRCompileLayer> compile_layer;
 
-	std::unique_ptr<llvm::TargetMachine> target_machine;
+	//std::unique_ptr<llvm::TargetMachine> target_machine;
+	std::unique_ptr<llvm::orc::MangleAndInterner> mangler;
 	std::unique_ptr<llvm::DataLayout> data_layout;
 	std::unordered_map<std::string, uint64_t> externals;
 };
