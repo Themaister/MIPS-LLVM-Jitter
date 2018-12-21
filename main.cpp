@@ -7,9 +7,9 @@ int main()
 {
 	Jitter::init_global();
 	Jitter jitter;
-	auto &ctx = jitter.get_context();
 	auto test = jitter.create_module("test");
-	auto builder = jitter.create_builder();
+	auto &ctx = test->getContext();
+	IRBuilder<> builder(ctx);
 
 	auto *vec = VectorType::get(Type::getFloatTy(ctx), 8);
 	auto *vecptr = PointerType::get(vec, 0);

@@ -14,14 +14,9 @@ void Jitter::init_global()
 	InitializeNativeTargetAsmParser();
 }
 
-LLVMContext &Jitter::get_context()
-{
-	return *context;
-}
-
 JITSymbol Jitter::find_symbol(const std::string &name)
 {
-	return compile_layer->findSymbol(name, false);
+	return cantFail(execution_session->lookup({&execution_session->getMainJITDylib()}, name));
 }
 
 JITTargetAddress Jitter::get_symbol_address(const std::string &name)
@@ -34,11 +29,6 @@ std::unique_ptr<Module> Jitter::create_module(const std::string &name)
 	return std::make_unique<Module>(name, *context);
 }
 
-IRBuilder<> Jitter::create_builder()
-{
-	return IRBuilder<>(*context);
-}
-
 void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbol)
 {
 	externals[name] = symbol;
@@ -48,8 +38,8 @@ Jitter::Jitter()
 {
 	context = std::make_unique<LLVMContext>();
 	execution_session = std::make_unique<ExecutionSession>();
-	memory_manager = std::make_shared<SectionMemoryManager>();
 
+#if 0
 	RTDyldObjectLinkingLayer::Resources resources;
 	resources.MemMgr = memory_manager;
 	resources.Resolver = createLegacyLookupResolver(
@@ -67,41 +57,32 @@ Jitter::Jitter()
 		},
 		[](Error) {}
 	);
+#endif
 
-	object_layer = std::make_unique<RTDyldObjectLinkingLayer>(
-		*execution_session,
-		[this, resources](VModuleKey) { return resources; });
+	object_layer = std::make_unique<RTDyldObjectLinkingLayer>(*execution_session,
+	                                                          []() { return std::make_unique<SectionMemoryManager>(); });
 
 	auto host = JITTargetMachineBuilder::detectHost();
-	target_machine = std::move(cantFail(host->createTargetMachine()));
-	data_layout = std::make_unique<DataLayout>(target_machine->createDataLayout());
+	data_layout = std::make_unique<DataLayout>(std::move(*host->getDefaultDataLayoutForTarget()));
 
-	compile_layer = std::make_unique<IRCompileLayer<
-		RTDyldObjectLinkingLayer,
-		SimpleCompiler>>(*object_layer,
-	                     SimpleCompiler(*target_machine));
-
-	sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
+	compile_layer = std::make_unique<IRCompileLayer>(*execution_session,
+	                                                 *object_layer,
+	                                                 ConcurrentIRCompiler(std::move(*host)));
 }
 
-Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
+void Jitter::add_module(std::unique_ptr<Module> module)
 {
 	module->print(errs(), nullptr);
 
-	auto K = execution_session->allocateVModule();
-	auto error = compile_layer->addModule(K, std::move(module));
-	if (!error)
-		return K;
-	else
-	{
-		errs() << "Failed to add module: " << error << "\n";
-		return 0;
-	}
+	auto error = compile_layer->add(execution_session->getMainJITDylib(),
+	                                ThreadSafeModule(std::move(module), std::make_unique<LLVMContext>()));
 }
 
+#if 0
 void Jitter::remove_module(Jitter::ModuleHandle module)
 {
 	auto error = compile_layer->removeModule(module);
 	if (!error.success())
 		llvm::errs() << "Failed to remove module: " << module << "\n";
 }
+#endif
