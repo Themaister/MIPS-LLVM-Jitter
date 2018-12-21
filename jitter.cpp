@@ -63,11 +63,12 @@ Jitter::Jitter()
 	                                                          []() { return std::make_unique<SectionMemoryManager>(); });
 
 	auto host = JITTargetMachineBuilder::detectHost();
+	target_machine = cantFail(host->createTargetMachine());
 	data_layout = std::make_unique<DataLayout>(std::move(*host->getDefaultDataLayoutForTarget()));
 
 	compile_layer = std::make_unique<IRCompileLayer>(*execution_session,
 	                                                 *object_layer,
-	                                                 ConcurrentIRCompiler(std::move(*host)));
+	                                                 SimpleCompiler(*target_machine));
 }
 
 void Jitter::add_module(std::unique_ptr<Module> module)

@@ -1,5 +1,5 @@
 #!/bin/bash
 
 cd llvm
-cmake --build . --target install # --parallel
+cmake --build . --target install -- -j2 # parallel
 

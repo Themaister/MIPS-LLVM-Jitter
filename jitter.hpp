@@ -42,7 +42,6 @@ private:
 
 	std::unique_ptr<llvm::TargetMachine> target_machine;
 	std::unique_ptr<llvm::DataLayout> data_layout;
-	std::unique_ptr<llvm::orc::MangleAndInterner> mangle_and_interner;
 	std::unordered_map<std::string, uint64_t> externals;
 };
 
