@@ -20,7 +20,9 @@ public:
 	Jitter();
 	static void init_global();
 
-	void add_module(std::unique_ptr<llvm::Module> module);
+	using ModuleHandle = llvm::orc::VModuleKey;
+	ModuleHandle add_module(std::unique_ptr<llvm::Module> module);
+	void remove_module(ModuleHandle handle);
 
 	llvm::JITSymbol find_symbol(const std::string &name);
 	llvm::JITTargetAddress get_symbol_address(const std::string &name);
@@ -38,10 +40,12 @@ public:
 private:
 	llvm::orc::ThreadSafeContext context;
 	std::unique_ptr<llvm::orc::ExecutionSession> execution_session;
-	std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_layer;
-	std::unique_ptr<llvm::orc::IRCompileLayer> compile_layer;
+	std::unique_ptr<llvm::orc::LegacyRTDyldObjectLinkingLayer> object_layer;
+	std::unique_ptr<llvm::orc::LegacyIRCompileLayer<
+		llvm::orc::LegacyRTDyldObjectLinkingLayer,
+		llvm::orc::SimpleCompiler>> compile_layer;
 
-	//std::unique_ptr<llvm::TargetMachine> target_machine;
+	std::unique_ptr<llvm::TargetMachine> target_machine;
 	std::unique_ptr<llvm::orc::MangleAndInterner> mangler;
 	std::unique_ptr<llvm::DataLayout> data_layout;
 	std::unordered_map<std::string, uint64_t> externals;
