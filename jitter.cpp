@@ -27,7 +27,11 @@ JITTargetAddress Jitter::get_symbol_address(const std::string &name)
 
 std::unique_ptr<Module> Jitter::create_module(const std::string &name)
 {
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	return std::make_unique<Module>(name, context);
+#else
 	return std::make_unique<Module>(name, *context.getContext());
+#endif
 }
 
 void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbol)
@@ -36,14 +40,20 @@ void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbo
 }
 
 Jitter::Jitter()
+#ifndef JITTER_LLVM_VERSION_LEGACY
 	: context(std::make_unique<LLVMContext>())
+#endif
 {
 	execution_session = std::make_unique<ExecutionSession>();
 	execution_session->setErrorReporter([](Error error) {
 		errs() << "Error: " << error << "\n";
 	});
 
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	RTDyldObjectLinkingLayer::Resources resources;
+#else
 	LegacyRTDyldObjectLinkingLayer::Resources resources;
+#endif
 	resources.MemMgr = std::make_shared<SectionMemoryManager>();
 	resources.Resolver = createLegacyLookupResolver(
 		*execution_session,
@@ -61,14 +71,28 @@ Jitter::Jitter()
 		[](Error) {}
 	);
 
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	object_layer = std::make_unique<RTDyldObjectLinkingLayer>(*execution_session, [=](VModuleKey) { return resources; });
+#else
 	object_layer = std::make_unique<LegacyRTDyldObjectLinkingLayer>(*execution_session, [=](VModuleKey) { return resources; });
+#endif
 
 	auto host = JITTargetMachineBuilder::detectHost();
 	target_machine = cantFail(host->createTargetMachine());
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	data_layout = std::make_unique<DataLayout>(target_machine->createDataLayout());
+#else
 	data_layout = std::make_unique<DataLayout>(std::move(*host->getDefaultDataLayoutForTarget()));
+#endif
 	mangler = std::make_unique<MangleAndInterner>(*execution_session, *data_layout);
+
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	compile_layer = std::make_unique<IRCompileLayer<
+	    RTDyldObjectLinkingLayer, SimpleCompiler>>(*object_layer, SimpleCompiler(*target_machine));
+#else
 	compile_layer = std::make_unique<LegacyIRCompileLayer<
 	    LegacyRTDyldObjectLinkingLayer, SimpleCompiler>>(*object_layer, SimpleCompiler(*target_machine));
+#endif
 }
 
 Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)

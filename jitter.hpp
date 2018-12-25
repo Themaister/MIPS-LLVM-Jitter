@@ -38,12 +38,24 @@ public:
 	void add_external_symbol_generic(const std::string &name, uint64_t symbol);
 
 private:
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	llvm::LLVMContext context;
+#else
 	llvm::orc::ThreadSafeContext context;
+#endif
 	std::unique_ptr<llvm::orc::ExecutionSession> execution_session;
+
+#ifdef JITTER_LLVM_VERSION_LEGACY
+	std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> object_layer;
+	std::unique_ptr<llvm::orc::IRCompileLayer<
+		llvm::orc::RTDyldObjectLinkingLayer,
+		llvm::orc::SimpleCompiler>> compile_layer;
+#else
 	std::unique_ptr<llvm::orc::LegacyRTDyldObjectLinkingLayer> object_layer;
 	std::unique_ptr<llvm::orc::LegacyIRCompileLayer<
 		llvm::orc::LegacyRTDyldObjectLinkingLayer,
 		llvm::orc::SimpleCompiler>> compile_layer;
+#endif
 
 	std::unique_ptr<llvm::TargetMachine> target_machine;
 	std::unique_ptr<llvm::orc::MangleAndInterner> mangler;
