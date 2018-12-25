@@ -11,31 +11,40 @@ int main()
 	auto &ctx = test->getContext();
 	IRBuilder<> builder(ctx);
 
-	auto *vec = VectorType::get(Type::getFloatTy(ctx), 8);
-	auto *vecptr = PointerType::get(vec, 0);
-	Type *arg_types[] = { vecptr };
+	Type *arg_types[] = { Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 
-	auto *function_type = FunctionType::get(Type::getVoidTy(ctx), arg_types, false);
+	auto *function_type = FunctionType::get(Type::getInt32Ty(ctx), arg_types, false);
 	auto *func = Function::Create(function_type, Function::ExternalLinkage, "test", test.get());
 
 	auto *bb = BasicBlock::Create(ctx, "entry", func);
-	builder.SetInsertPoint(bb);
+	auto *b1 = BasicBlock::Create(ctx, "a", func);
+	auto *b2 = BasicBlock::Create(ctx, "b", func);
+	auto *merge = BasicBlock::Create(ctx, "merge", func);
 
 	Value *arg = &func->args().begin()[0];
+	Value *arg2 = &func->args().begin()[1];
 
-	auto *loaded = builder.CreateAlignedLoad(arg, 4, "loaded");
-	auto *added = builder.CreateFAdd(loaded, loaded);
-	auto *cvec = ConstantVector::getSplat(8, ConstantFP::get(Type::getFloatTy(ctx), 40.0f));
-	added = builder.CreateFMul(added, cvec);
-	builder.CreateAlignedStore(added, arg, 4);
-	builder.CreateRetVoid();
+	builder.SetInsertPoint(bb);
+	auto *cmp = builder.CreateICmpEQ(arg, ConstantInt::get(Type::getInt32Ty(ctx), 20));
+	BranchInst::Create(b1, b2, cmp, bb);
+
+	builder.SetInsertPoint(b1);
+	auto *v1 = builder.CreateAdd(arg2, ConstantInt::get(Type::getInt32Ty(ctx), 40));
+	builder.SetInsertPoint(b2);
+	auto *v2 = builder.CreateMul(arg2, ConstantInt::get(Type::getInt32Ty(ctx), 40));
+	BranchInst::Create(merge, b1);
+	BranchInst::Create(merge, b2);
+
+	builder.SetInsertPoint(merge);
+	auto *phi = builder.CreatePHI(Type::getInt32Ty(ctx), 2);
+	phi->addIncoming(v1, b1);
+	phi->addIncoming(v2, b2);
+	builder.CreateRet(phi);
 
 	verifyFunction(*func, &errs());
 
 	jitter.add_module(std::move(test));
-	auto ptr = (void (*)(float *))jitter.get_symbol_address("test");
-
-	float blocks[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
-	ptr(blocks);
+	auto ptr = (int (*)(int, int))jitter.get_symbol_address("test");
+	int v = ptr(20, 50);
 	;
 }
