@@ -18,8 +18,10 @@ public:
 	virtual ~RecompilerBackend() = default;
 	virtual void recompile_basic_block(
 		Address start_addr, Address end_addr,
+		uint64_t dirty_registers,
 		Recompiler *recompiler,
 		llvm::BasicBlock *basic_block,
+		llvm::Value *arg,
 		llvm::Value **registers) = 0;
 };
 
@@ -36,6 +38,7 @@ public:
 	};
 
 	Result recompile_function(const Function &function);
+	llvm::BasicBlock *get_block_for_address(Address addr);
 
 	// Helpers which build various LLVM instructions.
 

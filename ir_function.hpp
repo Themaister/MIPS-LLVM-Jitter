@@ -43,7 +43,8 @@ struct BlockMeta
 	uint64_t child_preserve_registers = 0;
 
 	// After leaving a block, each register might get a new instance of itself (SSA), so keep track of that here.
-	uint32_t register_instance[MaxRegisters] = {};
+	uint32_t input_register_instance[MaxRegisters] = {};
+	uint32_t output_register_instance[MaxRegisters] = {};
 
 	void add_pred(BlockMeta *block);
 	std::vector<BlockMeta *> preds;

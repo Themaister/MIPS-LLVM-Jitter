@@ -15,6 +15,11 @@ void Recompiler::set_jitter(Jitter *jitter)
 	this->jitter = jitter;
 }
 
+llvm::BasicBlock *Recompiler::get_block_for_address(Address addr)
+{
+	return address_to_basic_block.find(addr)->second;
+}
+
 Recompiler::Result Recompiler::recompile_function(const Function &function)
 {
 	auto &visit_order = function.get_visit_order();
@@ -50,7 +55,7 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 	llvm::IRBuilder<> builder(entry_block);
 	for (int i = 0; i < MaxRegisters; i++)
 		if (loaded_registers & (1ull << i))
-			registers[i].instances[0] = builder.CreateLoad(builder.CreateConstInBoundsGEP1_64(arg, i));
+			registers[i].instances[0] = builder.CreateLoad(builder.CreateConstInBoundsGEP1_32(llvm::Type::getInt32Ty(ctx), arg, i));
 
 	for (auto &order : visit_order)
 	{
@@ -71,44 +76,50 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 		llvm::Value *register_bank[MaxRegisters] = {};
 
 		// Build PHI nodes if we need to.
-		for (int r = 0; i < MaxRegisters; i++)
+		for (int r = 0; r < MaxRegisters; r++)
 		{
 			if (meta_block.need_phi_node & (1ull << r))
 			{
 				phis[r] = builder.CreatePHI(llvm::Type::getInt32Ty(ctx), meta_block.preds.size());
-				registers[r].instances[meta_block.register_instance[r]] = phis[r];
+				registers[r].instances[meta_block.input_register_instance[r]] = phis[r];
 			}
 
-			register_bank[r] = registers[r].instances[meta_block.register_instance[r]];
+			register_bank[r] = registers[r].instances[meta_block.input_register_instance[r]];
 		}
 
 		backend->recompile_basic_block(meta_block.block.block_start, meta_block.block.block_end,
-		                               this, bb, register_bank);
+		                               meta_block.dirty_registers,
+		                               this, bb, arg, register_bank);
 
 		// Flush back the register bank.
-		for (int r = 0; i < MaxRegisters; i++)
-			if (meta_block.register_instance[r] != 0)
-				registers[r].instances[meta_block.register_instance[r]] = register_bank[r];
+		for (int r = 0; r < MaxRegisters; r++)
+			if (meta_block.output_register_instance[r] != 0)
+				registers[r].instances[meta_block.output_register_instance[r]] = register_bank[r];
 
 		// Update the PHI nodes with appropriate values.
 		// Need to do this after building the basic block because we can have loop feedback.
-		for (int r = 0; i < MaxRegisters; i++)
+		for (int r = 0; r < MaxRegisters; r++)
 		{
 			if (meta_block.need_phi_node & (1ull << r))
 			{
 				for (auto *pred : meta_block.preds)
 				{
-					llvm::Value *incoming_value = registers[r].instances[pred->register_instance[r]];
-					llvm::BasicBlock *incoming_block = address_to_basic_block.find(meta_block.block.block_start)->second;
+					llvm::Value *incoming_value = registers[r].instances[pred->output_register_instance[r]];
+					llvm::BasicBlock *incoming_block = address_to_basic_block.find(pred->block.block_start)->second;
 					phis[r]->addIncoming(incoming_value, incoming_block);
 				}
 			}
 		}
 	}
 
+	llvm::BranchInst::Create(basic_blocks[0], entry_block);
+
 	Result result = {};
-	if (!llvm::verifyFunction(*func, &llvm::errs()))
+	if (llvm::verifyFunction(*func, &llvm::errs()))
+	{
+		module->print(llvm::errs(), nullptr);
 		return result;
+	}
 
 	result.handle = jitter->add_module(move(module));
 	result.call = (void (*)(void *))jitter->get_symbol_address(to_string(visit_order.front()->block.block_start));

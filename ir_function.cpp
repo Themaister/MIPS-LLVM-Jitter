@@ -64,17 +64,17 @@ void Function::resolve_block(BlockMeta *meta)
 			if ((meta->block.preserve_registers | meta->child_preserve_registers) & (1ull << i))
 			{
 				bool same_instance = true;
-				uint32_t instance = meta->preds.front()->register_instance[i];
+				uint32_t instance = meta->preds.front()->output_register_instance[i];
 				for (auto *pred : meta->preds)
 				{
 					// If we get the same instance, and we write to the value in this block,
 					// we know we have a feedback scenario, and we need a PHI node.
 					bool feedback =
 						(meta->block.preserve_registers & (1ull << i)) != 0 &&
-						pred->register_instance[i] == instance &&
+						pred->output_register_instance[i] == instance &&
 						(meta->block.write_registers & (1ull << i)) != 0;
 
-					if (feedback || pred->register_instance[i] != instance)
+					if (feedback || pred->output_register_instance[i] != instance)
 					{
 						same_instance = false;
 						break;
@@ -84,19 +84,20 @@ void Function::resolve_block(BlockMeta *meta)
 				if (!same_instance)
 				{
 					meta->need_phi_node |= 1ull << i;
+					meta->input_register_instance[i] = ++register_instance[i];
 					// Mark the phi node as a write.
-					if (!(meta->block.write_registers & (1ull << i)))
-					{
-						meta->block.write_registers |= 1ull << i;
-						meta->register_instance[i] = ++register_instance[i];
-					}
+					meta->block.write_registers |= 1ull << i;
 				}
 				else
 				{
 					// It's all the same instance, inherit this information.
-					meta->register_instance[i] = instance;
+					meta->input_register_instance[i] = instance;
+					meta->output_register_instance[i] = instance;
 				}
 			}
+
+			if (meta->block.write_registers & (1ull << i))
+				meta->output_register_instance[i] = ++register_instance[i];
 		}
 	}
 }
@@ -116,6 +117,7 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 	auto *meta = meta_.get();
 	block_map[addr] = move(meta_);
 	backend->get_block_from_address(addr, meta->block);
+	meta->dirty_registers = meta->block.write_registers;
 
 	switch (meta->block.terminator)
 	{

@@ -25,10 +25,8 @@ enum class Op
 	ShiftRightLogicalImm,
 	ShiftRightArithmeticImm,
 
-	SMul,
-	UMul,
-	SMulImm,
-	UMulImm,
+	Mul,
+	MulImm,
 
 	LoadImmediate,
 	LoadImmediateUpper,
@@ -36,13 +34,9 @@ enum class Op
 	BZ,
 	BNZ,
 	CMPULessThan,
-	CMPUGreaterThanEqual,
 	CMPULessThanImm,
-	CMPUGreaterThanEqualImm,
 	CMPSLessThan,
-	CMPSGreaterThanEqual,
 	CMPSLessThanImm,
-	CMPSGreaterThanEqualImm,
 
 	Call,
 	BranchRegister,
@@ -106,9 +100,9 @@ struct Instr
 
 static const Instr IDAT[] = {
 	{ Op::LoadImmediate, OP_1REG_IMM(1, 0) },
-	{ Op::LoadImmediate, OP_1REG_IMM(60, 0) },
-	{ Op::Add, OP_3REG(1, 2, 60) },
-	{ Op::AddImm, OP_1REG_IMM(60, 1) },
+	{ Op::ShiftLeft, OP_3REG(60, 2, 2) },
+	{ Op::Add, OP_3REG(1, 1, 3) },
+	{ Op::AddImm, OP_2REG_IMM(60, 60, 1) },
 	{ Op::CMPSLessThanImm, OP_2REG_IMM(61, 60, 10) },
 	{ Op::BNZ, OP_1REG_IMM(61, -4) },
 	{ Op::Call, OP_ABS(256) },
@@ -166,12 +160,9 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			case Op::ShiftLeft:
 			case Op::ShiftRightArithmetic:
 			case Op::ShiftRightLogical:
-			case Op::SMul:
-			case Op::UMul:
+			case Op::Mul:
 			case Op::CMPSLessThan:
-			case Op::CMPSGreaterThanEqual:
 			case Op::CMPULessThan:
-			case Op::CMPUGreaterThanEqual:
 			{
 				read_register(block, instr.get_3op_ra());
 				read_register(block, instr.get_3op_rb());
@@ -186,12 +177,9 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			case Op::ShiftLeftImm:
 			case Op::ShiftRightArithmeticImm:
 			case Op::ShiftRightLogicalImm:
-			case Op::CMPUGreaterThanEqualImm:
 			case Op::CMPULessThanImm:
-			case Op::CMPSGreaterThanEqualImm:
 			case Op::CMPSLessThanImm:
-			case Op::SMulImm:
-			case Op::UMulImm:
+			case Op::MulImm:
 			{
 				read_register(block, instr.get_2op_imm_ra());
 				write_register(block, instr.get_2op_imm_rc());
@@ -263,10 +251,194 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 	}
 
 	void recompile_basic_block(
-		Address start_addr, Address end_addr,
-		Recompiler *recompiler, BasicBlock *block, Value **registers) override
+		Address start_addr, Address end_addr, uint64_t dirty_registers,
+		Recompiler *recompiler, BasicBlock *block, Value *arg, Value **registers) override
 	{
+		IRBuilder<> builder(block);
+		auto &ctx = block->getContext();
 
+		for (Address addr = start_addr; addr < end_addr; addr += 4)
+		{
+			auto &instr = IDAT[addr >> 2];
+
+			switch (instr.op)
+			{
+			case Op::Add:
+				registers[instr.get_3op_rc()] = builder.CreateAdd(
+					registers[instr.get_3op_ra()],
+					registers[instr.get_3op_rb()]);
+				break;
+
+			case Op::Sub:
+				registers[instr.get_3op_rc()] = builder.CreateSub(
+					registers[instr.get_3op_ra()],
+					registers[instr.get_3op_rb()]);
+				break;
+
+			case Op::Or:
+				registers[instr.get_3op_rc()] = builder.CreateOr(
+					registers[instr.get_3op_ra()],
+					registers[instr.get_3op_rb()]);
+				break;
+
+			case Op::Xor:
+				registers[instr.get_3op_rc()] = builder.CreateXor(
+					registers[instr.get_3op_ra()],
+					registers[instr.get_3op_rb()]);
+				break;
+
+			case Op::And:
+				registers[instr.get_3op_rc()] = builder.CreateAnd(
+					registers[instr.get_3op_ra()],
+					registers[instr.get_3op_rb()]);
+				break;
+
+			case Op::Mul:
+				registers[instr.get_3op_rc()] = builder.CreateMul(
+					registers[instr.get_3op_ra()],
+					registers[instr.get_3op_rb()]);
+				break;
+
+			case Op::ShiftLeft:
+				registers[instr.get_3op_rc()] = builder.CreateShl(
+					registers[instr.get_3op_ra()],
+					builder.CreateAnd(registers[instr.get_3op_rb()], ConstantInt::get(Type::getInt32Ty(ctx), 31)));
+				break;
+
+			case Op::ShiftRightLogical:
+				registers[instr.get_3op_rc()] = builder.CreateLShr(
+					registers[instr.get_3op_ra()],
+					builder.CreateAnd(registers[instr.get_3op_rb()], ConstantInt::get(Type::getInt32Ty(ctx), 31)));
+				break;
+
+			case Op::ShiftRightArithmetic:
+				registers[instr.get_3op_rc()] = builder.CreateAShr(
+					registers[instr.get_3op_ra()],
+					builder.CreateAnd(registers[instr.get_3op_rb()], ConstantInt::get(Type::getInt32Ty(ctx), 31)));
+				break;
+
+			case Op::CMPSLessThan:
+				registers[instr.get_3op_rc()] =
+					builder.CreateSelect(builder.CreateICmpSLT(registers[instr.get_3op_ra()], registers[instr.get_3op_rb()]),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+				break;
+
+			case Op::CMPULessThan:
+				registers[instr.get_3op_rc()] =
+					builder.CreateSelect(builder.CreateICmpULT(registers[instr.get_3op_ra()], registers[instr.get_3op_rb()]),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+				break;
+
+			case Op::AddImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateAdd(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff)));
+				break;
+
+			case Op::OrImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateOr(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+				break;
+
+			case Op::AndImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateAnd(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+				break;
+
+			case Op::XorImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateXor(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+				break;
+
+			case Op::ShiftLeftImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateShl(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31));
+				break;
+
+			case Op::ShiftRightLogicalImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateLShr(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31));
+				break;
+
+			case Op::ShiftRightArithmeticImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateAShr(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31));
+				break;
+
+			case Op::MulImm:
+				registers[instr.get_2op_imm_rc()] = builder.CreateMul(
+					registers[instr.get_2op_imm_ra()],
+					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff)));
+				break;
+
+			case Op::CMPSLessThanImm:
+				registers[instr.get_2op_imm_rc()] =
+					builder.CreateSelect(builder.CreateICmpSLT(registers[instr.get_2op_imm_ra()], ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+				break;
+
+			case Op::CMPULessThanImm:
+				registers[instr.get_3op_rc()] =
+					builder.CreateSelect(builder.CreateICmpULT(registers[instr.get_2op_imm_ra()], ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+				break;
+
+			case Op::LoadImmediate:
+				registers[instr.get_1op_imm_rc()] = ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff));
+				break;
+
+			case Op::LoadImmediateUpper:
+				registers[instr.get_1op_imm_rc()] = ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff) << 16);
+				break;
+
+			case Op::BNZ:
+				BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
+				                   recompiler->get_block_for_address(addr + 4),
+				                   builder.CreateICmpNE(registers[instr.get_1op_imm_rc()], ConstantInt::get(Type::getInt32Ty(ctx), 0)), block);
+				break;
+
+			case Op::BZ:
+				BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
+				                   recompiler->get_block_for_address(addr + 4),
+				                   builder.CreateICmpEQ(registers[instr.get_1op_imm_rc()], ConstantInt::get(Type::getInt32Ty(ctx), 0)), block);
+				break;
+
+			case Op::Call:
+				for (int i = 0; i < MaxRegisters; i++)
+				{
+					if (dirty_registers & (1ull << i))
+					{
+						auto *ptr = builder.CreateConstInBoundsGEP1_32(Type::getInt32Ty(ctx), arg, i);
+						builder.CreateStore(ptr, registers[i]);
+					}
+				}
+				break;
+
+			case Op::BranchRegister:
+			case Op::CallRegister:
+				for (int i = 0; i < MaxRegisters; i++)
+				{
+					if (dirty_registers & (1ull << i))
+					{
+						assert(registers[i]);
+						auto *ptr = builder.CreateConstInBoundsGEP1_32(Type::getInt32Ty(ctx), arg, i);
+						builder.CreateStore(ptr, registers[i]);
+					}
+				}
+				builder.CreateRetVoid();
+				break;
+			}
+		}
 	}
 };
 
@@ -275,9 +447,12 @@ int main()
 	Jitter::init_global();
 	JITTIR::Function func;
 	JITTIR::Recompiler recompiler;
+	JITTIR::Jitter jitter;
 	Backend back;
 	func.set_backend(&back);
 	recompiler.set_backend(&back);
+	recompiler.set_jitter(&jitter);
 
 	func.analyze_from_entry(0);
+	auto result = recompiler.recompile_function(func);
 }
