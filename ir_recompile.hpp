@@ -14,8 +14,10 @@ class Recompiler;
 
 class RecompilerBackend
 {
+public:
 	virtual ~RecompilerBackend() = default;
 	virtual void recompile_basic_block(
+		Address start_addr, Address end_addr,
 		Recompiler *recompiler,
 		llvm::BasicBlock *basic_block,
 		llvm::Value **registers) = 0;

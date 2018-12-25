@@ -44,8 +44,9 @@ void Function::resolve_block(BlockMeta *meta)
 
 	for (auto *pred : meta->preds)
 	{
-		// If we need to preserve registers, all call paths into our block must also preserve.
-		pred->block.preserve_registers |= meta->block.preserve_registers;
+		// If we need to preserve registers somehow, all call paths into our block must also preserve.
+		// Distinguish between preserved registers (actual read), and transient reads (read only by children later).
+		pred->block.child_preserve_registers |= meta->block.preserve_registers | meta->block.child_preserve_registers;
 
 		resolve_block(pred);
 
@@ -60,13 +61,20 @@ void Function::resolve_block(BlockMeta *meta)
 	{
 		for (int i = 0; i < MaxRegisters; i++)
 		{
-			if (meta->block.preserve_registers & (1ull << i))
+			if ((meta->block.preserve_registers | meta->block.child_preserve_registers) & (1ull << i))
 			{
 				bool same_instance = true;
 				uint32_t instance = meta->preds.front()->register_instance[i];
 				for (auto *pred : meta->preds)
 				{
-					if (pred == meta || pred->register_instance[i] != instance)
+					// If we get the same instance, and we write to the value in this block,
+					// we know we have a feedback scenario, and we need a PHI node.
+					bool feedback =
+						(meta->block.preserve_registers & (1ull << i)) != 0 &&
+						pred->register_instance[i] == instance &&
+						(meta->block.write_registers & (1ull << i)) != 0;
+
+					if (feedback || pred->register_instance[i] != instance)
 					{
 						same_instance = false;
 						break;
@@ -91,6 +99,11 @@ void Function::resolve_block(BlockMeta *meta)
 			}
 		}
 	}
+}
+
+uint32_t Function::get_instances_for_register(unsigned index) const
+{
+	return register_instance[index] + 1;
 }
 
 BlockMeta *Function::analyze_from_entry_inner(Address addr)

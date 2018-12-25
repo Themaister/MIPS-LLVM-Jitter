@@ -26,6 +26,7 @@ struct Block
 	Address block_end = 0; // Address past last executed instruction.
 
 	uint64_t preserve_registers = 0;
+	uint64_t child_preserve_registers = 0;
 	uint64_t write_registers = 0;
 
 	// For DirectBranch and SelectionBranch.
@@ -67,6 +68,8 @@ public:
 	{
 		return visit_order;
 	}
+
+	uint32_t get_instances_for_register(unsigned index) const;
 
 private:
 	BlockAnalysisBackend *backend = nullptr;
