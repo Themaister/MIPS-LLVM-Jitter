@@ -46,7 +46,7 @@ void Function::resolve_block(BlockMeta *meta)
 	{
 		// If we need to preserve registers somehow, all call paths into our block must also preserve.
 		// Distinguish between preserved registers (actual read), and transient reads (read only by children later).
-		pred->block.child_preserve_registers |= meta->block.preserve_registers | meta->block.child_preserve_registers;
+		pred->child_preserve_registers |= meta->block.preserve_registers | meta->child_preserve_registers;
 
 		resolve_block(pred);
 
@@ -61,7 +61,7 @@ void Function::resolve_block(BlockMeta *meta)
 	{
 		for (int i = 0; i < MaxRegisters; i++)
 		{
-			if ((meta->block.preserve_registers | meta->block.child_preserve_registers) & (1ull << i))
+			if ((meta->block.preserve_registers | meta->child_preserve_registers) & (1ull << i))
 			{
 				bool same_instance = true;
 				uint32_t instance = meta->preds.front()->register_instance[i];
@@ -112,7 +112,9 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 	if (itr != end(block_map))
 		return itr->second.get();
 
-	auto meta = make_unique<BlockMeta>();
+	auto meta_ = make_unique<BlockMeta>();
+	auto *meta = meta_.get();
+	block_map[addr] = move(meta_);
 	backend->get_block_from_address(addr, meta->block);
 
 	switch (meta->block.terminator)
@@ -120,7 +122,7 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 	case Terminator::DirectBranch:
 	{
 		auto *target = analyze_from_entry_inner(meta->block.static_address_targets[0]);
-		target->add_pred(meta.get());
+		target->add_pred(meta);
 		meta->targets[0] = target;
 		break;
 	}
@@ -131,7 +133,7 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 		for (auto target_addr : meta->block.static_address_targets)
 		{
 			auto *target = analyze_from_entry_inner(target_addr);
-			target->add_pred(meta.get());
+			target->add_pred(meta);
 			*pt++ = target;
 		}
 		break;
@@ -142,7 +144,7 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 	{
 		// This will end any function. For indirect branches, we will return after all call if the leaf target returns.
 		// For unwind we directly call longjmp and end our frame.
-		leaf_blocks.push_back(meta.get());
+		leaf_blocks.push_back(meta);
 		break;
 	}
 
@@ -150,6 +152,6 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 		break;
 	}
 
-	return meta.get();
+	return meta;
 }
 }

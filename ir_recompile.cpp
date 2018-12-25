@@ -44,7 +44,7 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 
 	// Load the registers we need to read from memory.
 	auto &entry_meta_block = *visit_order.front();
-	uint64_t loaded_registers = entry_meta_block.block.child_preserve_registers |
+	uint64_t loaded_registers = entry_meta_block.child_preserve_registers |
 	                            entry_meta_block.block.preserve_registers;
 
 	llvm::IRBuilder<> builder(entry_block);

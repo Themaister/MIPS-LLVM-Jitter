@@ -26,7 +26,6 @@ struct Block
 	Address block_end = 0; // Address past last executed instruction.
 
 	uint64_t preserve_registers = 0;
-	uint64_t child_preserve_registers = 0;
 	uint64_t write_registers = 0;
 
 	// For DirectBranch and SelectionBranch.
@@ -41,6 +40,7 @@ struct BlockMeta
 	// Registers which must be flushed to memory before leaving the JIT-ed function (indirect or unwind).
 	uint64_t dirty_registers = 0;
 	uint64_t need_phi_node = 0;
+	uint64_t child_preserve_registers = 0;
 
 	// After leaving a block, each register might get a new instance of itself (SSA), so keep track of that here.
 	uint32_t register_instance[MaxRegisters] = {};
