@@ -236,7 +236,7 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 				{
 					block.terminator = Terminator::DirectBranch;
 					block.static_address_targets[0] =
-						addr + int16_t(instr.arg & 0xffff);
+						addr + int16_t(instr.arg & 0xffff) * 4;
 				}
 				else
 				{
@@ -251,11 +251,12 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			{
 				block.terminator = Terminator::SelectionBranch;
 				block.static_address_targets[0] =
-					addr + int16_t(instr.arg & 0xffff);
+					addr + int16_t(instr.arg & 0xffff) * 4;
 				block.static_address_targets[1] =
 					addr;
 			}
-
+			else if (instr.op == Op::BranchRegister || instr.op == Op::CallRegister)
+				block.terminator = Terminator::Unwind;
 		} while (!ends_block);
 
 		block.block_end = addr;
@@ -279,5 +280,4 @@ int main()
 	recompiler.set_backend(&back);
 
 	func.analyze_from_entry(0);
-	;
 }

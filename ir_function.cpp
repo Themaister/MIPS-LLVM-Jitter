@@ -31,7 +31,7 @@ void Function::analyze_from_entry(Address addr)
 	analyze_from_entry_inner(addr);
 	for (auto *block : leaf_blocks)
 		resolve_block(block);
-	reverse(begin(visit_order), end(visit_order));
+	;
 }
 
 void Function::resolve_block(BlockMeta *meta)
@@ -39,8 +39,6 @@ void Function::resolve_block(BlockMeta *meta)
 	if (meta->resolve_complete)
 		return;
 	meta->resolve_complete = true;
-
-	visit_order.push_back(meta);
 
 	for (auto *pred : meta->preds)
 	{
@@ -53,6 +51,8 @@ void Function::resolve_block(BlockMeta *meta)
 		// All call path writes to any register must be flushed.
 		meta->dirty_registers |= pred->dirty_registers;
 	}
+
+	visit_order.push_back(meta);
 
 	// For each register we need to preserve into a block, check if we need a PHI node for it.
 	// This is the case if not all the timestamps for a register is the same.
