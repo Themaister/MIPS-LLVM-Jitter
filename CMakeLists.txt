@@ -46,7 +46,10 @@ elseif (MSVC)
     set(JITTER_CXX_FLAGS /D_CRT_SECURE_NO_WARNINGS /wd4267 /wd4244 /wd4309 /wd4005 /MP /DNOMINMAX)
 endif()
 
-add_library(jitter STATIC jitter.hpp jitter.cpp)
+add_library(jitter STATIC
+        jitter.hpp jitter.cpp
+        ir_frontend.hpp ir_frontend.cpp)
+
 add_executable(jitter-test main.cpp)
 target_link_libraries(jitter-test PRIVATE jitter)
 target_compile_options(jitter-test PRIVATE ${JITTER_CXX_FLAGS})
