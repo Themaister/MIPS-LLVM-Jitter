@@ -1,12 +1,12 @@
-#include "ir_frontend.hpp"
+#include "ir_function.hpp"
 #include <string.h>
 #include <algorithm>
 
 using namespace std;
 
-namespace IR
+namespace JITTIR
 {
-void IRFrontend::set_backend(IR::Backend *backend)
+void Function::set_backend(BlockAnalysisBackend *backend)
 {
 	this->backend = backend;
 }
@@ -17,29 +17,39 @@ void BlockMeta::add_pred(BlockMeta *block)
 		preds.push_back(block);
 }
 
-void IRFrontend::reset()
+void Function::reset()
 {
 	block_map.clear();
 	leaf_blocks.clear();
+	visit_order.clear();
 	memset(register_instance, 0, sizeof(register_instance));
 }
 
-void IRFrontend::analyze_from_entry(Address addr)
+void Function::analyze_from_entry(Address addr)
 {
 	reset();
 	analyze_from_entry_inner(addr);
 	for (auto *block : leaf_blocks)
 		resolve_block(block);
+	reverse(begin(visit_order), end(visit_order));
 }
 
-void IRFrontend::resolve_block(BlockMeta *meta)
+void Function::resolve_block(BlockMeta *meta)
 {
-	if (meta->complete)
+	if (meta->resolve_complete)
 		return;
+	meta->resolve_complete = true;
+
+	visit_order.push_back(meta);
 
 	for (auto *pred : meta->preds)
 	{
+		// If we need to preserve registers, all call paths into our block must also preserve.
+		pred->block.preserve_registers |= meta->block.preserve_registers;
+
 		resolve_block(pred);
+
+		// All call path writes to any register must be flushed.
 		meta->dirty_registers |= pred->dirty_registers;
 	}
 
@@ -81,11 +91,9 @@ void IRFrontend::resolve_block(BlockMeta *meta)
 			}
 		}
 	}
-
-	meta->complete = true;
 }
 
-BlockMeta *IRFrontend::analyze_from_entry_inner(Address addr)
+BlockMeta *Function::analyze_from_entry_inner(Address addr)
 {
 	auto itr = block_map.find(addr);
 	if (itr != end(block_map))
@@ -107,9 +115,9 @@ BlockMeta *IRFrontend::analyze_from_entry_inner(Address addr)
 	case Terminator::SelectionBranch:
 	{
 		auto *pt = meta->targets;
-		for (auto addr : meta->block.static_address_targets)
+		for (auto target_addr : meta->block.static_address_targets)
 		{
-			auto *target = analyze_from_entry_inner(addr);
+			auto *target = analyze_from_entry_inner(target_addr);
 			target->add_pred(meta.get());
 			*pt++ = target;
 		}
@@ -118,10 +126,12 @@ BlockMeta *IRFrontend::analyze_from_entry_inner(Address addr)
 
 	case Terminator::Unwind:
 	case Terminator::IndirectBranch:
+	{
 		// This will end any function. For indirect branches, we will return after all call if the leaf target returns.
 		// For unwind we directly call longjmp and end our frame.
 		leaf_blocks.push_back(meta.get());
 		break;
+	}
 
 	default:
 		break;

@@ -14,17 +14,23 @@
 #include <memory>
 #include <unordered_map>
 
+namespace JITTIR
+{
 class Jitter
 {
 public:
 	Jitter();
+
 	static void init_global();
 
 	using ModuleHandle = llvm::orc::VModuleKey;
+
 	ModuleHandle add_module(std::unique_ptr<llvm::Module> module);
+
 	void remove_module(ModuleHandle handle);
 
 	llvm::JITSymbol find_symbol(const std::string &name);
+
 	llvm::JITTargetAddress get_symbol_address(const std::string &name);
 
 	std::unique_ptr<llvm::Module> create_module(const std::string &name);
@@ -32,7 +38,7 @@ public:
 	template <typename T>
 	void add_external_symbol(const std::string &name, T sym)
 	{
-		add_external_symbol_generic(name, (uint64_t)sym);
+		add_external_symbol_generic(name, (uint64_t) sym);
 	}
 
 	void add_external_symbol_generic(const std::string &name, uint64_t symbol);
@@ -62,4 +68,4 @@ private:
 	std::unique_ptr<llvm::DataLayout> data_layout;
 	std::unordered_map<std::string, uint64_t> externals;
 };
-
+}

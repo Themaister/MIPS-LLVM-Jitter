@@ -48,7 +48,8 @@ endif()
 
 add_library(jitter STATIC
         jitter.hpp jitter.cpp
-        ir_frontend.hpp ir_frontend.cpp)
+        ir_function.hpp ir_function.cpp
+        ir_recompile.cpp ir_recompile.hpp)
 
 add_executable(jitter-test main.cpp)
 target_link_libraries(jitter-test PRIVATE jitter)

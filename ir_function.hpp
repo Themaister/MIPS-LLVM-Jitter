@@ -4,7 +4,7 @@
 #include <memory>
 #include <stdint.h>
 
-namespace IR
+namespace JITTIR
 {
 using Address = uint32_t;
 enum
@@ -47,25 +47,32 @@ struct BlockMeta
 	void add_pred(BlockMeta *block);
 	std::vector<BlockMeta *> preds;
 	BlockMeta *targets[2] = {};
-	bool complete = false;
+	bool resolve_complete = false;
 };
 
-class Backend
+class BlockAnalysisBackend
 {
 public:
+	virtual ~BlockAnalysisBackend() = default;
 	virtual void get_block_from_address(Address addr, Block &block) = 0;
 };
 
-class IRFrontend
+class Function
 {
 public:
-	void set_backend(Backend *backend);
+	void set_backend(BlockAnalysisBackend *backend);
 	void analyze_from_entry(Address addr); // Map out all static execution paths from an address.
 
+	const std::vector<BlockMeta *> &get_visit_order() const
+	{
+		return visit_order;
+	}
+
 private:
-	Backend *backend = nullptr;
+	BlockAnalysisBackend *backend = nullptr;
 	std::unordered_map<Address, std::unique_ptr<BlockMeta>> block_map;
 	std::vector<BlockMeta *> leaf_blocks;
+	std::vector<BlockMeta *> visit_order;
 	uint32_t register_instance[MaxRegisters] = {};
 
 	BlockMeta *analyze_from_entry_inner(Address addr); // Map out all static execution paths from an address.

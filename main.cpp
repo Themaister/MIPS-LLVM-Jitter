@@ -2,6 +2,7 @@
 #include "llvm/IR/Verifier.h"
 
 using namespace llvm;
+using namespace JITTIR;
 
 int main()
 {

@@ -8,6 +8,8 @@
 using namespace llvm;
 using namespace orc;
 
+namespace JITTIR
+{
 void Jitter::init_global()
 {
 	InitializeNativeTarget();
@@ -41,7 +43,7 @@ void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbo
 
 Jitter::Jitter()
 #ifndef JITTER_LLVM_VERSION_LEGACY
-	: context(std::make_unique<LLVMContext>())
+: context(std::make_unique<LLVMContext>())
 #endif
 {
 	execution_session = std::make_unique<ExecutionSession>();
@@ -72,7 +74,8 @@ Jitter::Jitter()
 	);
 
 #ifdef JITTER_LLVM_VERSION_LEGACY
-	object_layer = std::make_unique<RTDyldObjectLinkingLayer>(*execution_session, [=](VModuleKey) { return resources; });
+	object_layer = std::make_unique<RTDyldObjectLinkingLayer>(*execution_session,
+	                                                          [=](VModuleKey) { return resources; });
 #else
 	object_layer = std::make_unique<LegacyRTDyldObjectLinkingLayer>(*execution_session, [=](VModuleKey) { return resources; });
 #endif
@@ -88,10 +91,10 @@ Jitter::Jitter()
 
 #ifdef JITTER_LLVM_VERSION_LEGACY
 	compile_layer = std::make_unique<IRCompileLayer<
-	    RTDyldObjectLinkingLayer, SimpleCompiler>>(*object_layer, SimpleCompiler(*target_machine));
+		RTDyldObjectLinkingLayer, SimpleCompiler>>(*object_layer, SimpleCompiler(*target_machine));
 #else
 	compile_layer = std::make_unique<LegacyIRCompileLayer<
-	    LegacyRTDyldObjectLinkingLayer, SimpleCompiler>>(*object_layer, SimpleCompiler(*target_machine));
+		LegacyRTDyldObjectLinkingLayer, SimpleCompiler>>(*object_layer, SimpleCompiler(*target_machine));
 #endif
 }
 
@@ -111,4 +114,5 @@ void Jitter::remove_module(Jitter::ModuleHandle module)
 	auto error = compile_layer->removeModule(module);
 	if (!error.success())
 		llvm::errs() << "Failed to remove module: " << module << "\n";
+}
 }
