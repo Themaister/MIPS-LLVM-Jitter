@@ -59,12 +59,18 @@ void Function::resolve_block(BlockMeta *meta)
 	// If we have a PHI node, make sure that we also mark the register as written, with its own timestamp.
 	if (!meta->preds.empty())
 	{
+		uint64_t inherit = 0;
+		for (auto *pred : meta->preds)
+			inherit |= pred->dirty_registers;
+		inherit &= ~meta->block.write_registers;
+
 		for (int i = 0; i < MaxRegisters; i++)
 		{
-			if ((meta->block.preserve_registers | meta->child_preserve_registers) & (1ull << i))
+			if ((inherit | meta->block.preserve_registers | meta->child_preserve_registers) & (1ull << i))
 			{
 				bool same_instance = true;
 				uint32_t instance = meta->preds.front()->output_register_instance[i];
+
 				for (auto *pred : meta->preds)
 				{
 					// If we get the same instance, and we write to the value in this block,
@@ -85,15 +91,14 @@ void Function::resolve_block(BlockMeta *meta)
 				{
 					meta->need_phi_node |= 1ull << i;
 					meta->input_register_instance[i] = ++register_instance[i];
-					// Mark the phi node as a write.
-					meta->block.write_registers |= 1ull << i;
 				}
 				else
 				{
 					// It's all the same instance, inherit this information.
 					meta->input_register_instance[i] = instance;
-					meta->output_register_instance[i] = instance;
 				}
+
+				meta->output_register_instance[i] = meta->input_register_instance[i];
 			}
 
 			if (meta->block.write_registers & (1ull << i))

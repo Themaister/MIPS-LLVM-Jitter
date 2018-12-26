@@ -100,10 +100,10 @@ struct Instr
 
 static const Instr IDAT[] = {
 	{ Op::LoadImmediate, OP_1REG_IMM(1, 0) },
-	{ Op::ShiftLeft, OP_3REG(60, 2, 2) },
-	{ Op::Add, OP_3REG(1, 1, 3) },
+	{ Op::Mul, OP_3REG(60, 2, 2) },
+	{ Op::Add, OP_3REG(1, 1, 60) },
 	{ Op::AddImm, OP_2REG_IMM(60, 60, 1) },
-	{ Op::CMPSLessThanImm, OP_2REG_IMM(61, 60, 10) },
+	{ Op::CMPSLessThan, OP_3REG(61, 60, 3) },
 	{ Op::BNZ, OP_1REG_IMM(61, -4) },
 	{ Op::Call, OP_ABS(256) },
 	{ Op::BranchRegister, OP_1REG(63) },
@@ -201,6 +201,7 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			}
 
 			case Op::Call:
+				write_register(block, 63);
 				break;
 
 			case Op::BranchRegister:
@@ -414,14 +415,7 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 				break;
 
 			case Op::Call:
-				for (int i = 0; i < MaxRegisters; i++)
-				{
-					if (dirty_registers & (1ull << i))
-					{
-						auto *ptr = builder.CreateConstInBoundsGEP1_32(Type::getInt32Ty(ctx), arg, i);
-						builder.CreateStore(ptr, registers[i]);
-					}
-				}
+				registers[63] = ConstantInt::get(Type::getInt32Ty(ctx), addr + 4);
 				break;
 
 			case Op::BranchRegister:
@@ -431,8 +425,8 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 					if (dirty_registers & (1ull << i))
 					{
 						assert(registers[i]);
-						auto *ptr = builder.CreateConstInBoundsGEP1_32(Type::getInt32Ty(ctx), arg, i);
-						builder.CreateStore(ptr, registers[i]);
+						auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i);
+						builder.CreateStore(registers[i], ptr);
 					}
 				}
 				builder.CreateRetVoid();
@@ -455,4 +449,9 @@ int main()
 
 	func.analyze_from_entry(0);
 	auto result = recompiler.recompile_function(func);
+
+	int32_t registers[MaxRegisters] = {};
+	registers[3] = 100;
+	result.call(registers);
+	result.call(registers);
 }

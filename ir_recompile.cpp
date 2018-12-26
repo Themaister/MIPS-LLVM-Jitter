@@ -52,10 +52,10 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 	uint64_t loaded_registers = entry_meta_block.child_preserve_registers |
 	                            entry_meta_block.block.preserve_registers;
 
-	llvm::IRBuilder<> builder(entry_block);
+	llvm::IRBuilder<> top_builder(entry_block);
 	for (int i = 0; i < MaxRegisters; i++)
 		if (loaded_registers & (1ull << i))
-			registers[i].instances[0] = builder.CreateLoad(builder.CreateConstInBoundsGEP1_32(llvm::Type::getInt32Ty(ctx), arg, i));
+			registers[i].instances[0] = top_builder.CreateLoad(top_builder.CreateConstInBoundsGEP1_64(arg, i));
 
 	for (auto &order : visit_order)
 	{
@@ -105,6 +105,13 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 				for (auto *pred : meta_block.preds)
 				{
 					llvm::Value *incoming_value = registers[r].instances[pred->output_register_instance[r]];
+					if (!incoming_value)
+					{
+						if (!registers[r].instances[0])
+							registers[r].instances[0] = top_builder.CreateLoad(top_builder.CreateConstInBoundsGEP1_64(arg, r));
+						incoming_value = registers[r].instances[0];
+					}
+
 					llvm::BasicBlock *incoming_block = address_to_basic_block.find(pred->block.block_start)->second;
 					phis[r]->addIncoming(incoming_value, incoming_block);
 				}
