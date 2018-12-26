@@ -3,6 +3,10 @@
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
 #include <future>
 
 using namespace llvm;
@@ -100,6 +104,20 @@ Jitter::Jitter()
 
 Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
 {
+	legacy::FunctionPassManager pass_manager(module.get());
+	pass_manager.add(createConstantPropagationPass());
+	pass_manager.add(createInstructionCombiningPass());
+	pass_manager.add(createCFGSimplificationPass());
+	pass_manager.add(createAggressiveDCEPass());
+	pass_manager.add(createLoopSimplifyCFGPass());
+	pass_manager.add(createLICMPass());
+	pass_manager.add(createLoopSinkPass());
+	pass_manager.add(createReassociatePass());
+	pass_manager.add(createNewGVNPass());
+	pass_manager.doInitialization();
+	for (auto &func : *module)
+		pass_manager.run(func);
+
 	module->print(errs(), nullptr);
 	auto K = execution_session->allocateVModule();
 	auto error = compile_layer->addModule(K, std::move(module));
