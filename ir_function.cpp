@@ -22,7 +22,6 @@ void Function::reset()
 	block_map.clear();
 	leaf_blocks.clear();
 	visit_order.clear();
-	memset(register_instance, 0, sizeof(register_instance));
 }
 
 void Function::analyze_from_entry(Address addr)
@@ -31,7 +30,6 @@ void Function::analyze_from_entry(Address addr)
 	analyze_from_entry_inner(addr);
 	for (auto *block : leaf_blocks)
 		resolve_block(block);
-	;
 }
 
 void Function::resolve_block(BlockMeta *meta)
@@ -41,75 +39,9 @@ void Function::resolve_block(BlockMeta *meta)
 	meta->resolve_complete = true;
 
 	for (auto *pred : meta->preds)
-	{
-		// If we need to preserve registers somehow, all call paths into our block must also preserve.
-		// Distinguish between preserved registers (actual read), and transient reads (read only by children later).
-		pred->child_preserve_registers |= meta->block.preserve_registers | meta->child_preserve_registers;
-
 		resolve_block(pred);
 
-		// All call path writes to any register must be flushed.
-		meta->dirty_registers |= pred->dirty_registers;
-	}
-
 	visit_order.push_back(meta);
-
-	// For each register we need to preserve into a block, check if we need a PHI node for it.
-	// This is the case if not all the timestamps for a register is the same.
-	// If we have a PHI node, make sure that we also mark the register as written, with its own timestamp.
-	if (!meta->preds.empty())
-	{
-		uint64_t inherit = 0;
-		for (auto *pred : meta->preds)
-			inherit |= pred->dirty_registers;
-		inherit &= ~meta->block.write_registers;
-
-		for (int i = 0; i < MaxRegisters; i++)
-		{
-			if ((inherit | meta->block.preserve_registers | meta->child_preserve_registers) & (1ull << i))
-			{
-				bool same_instance = true;
-				uint32_t instance = meta->preds.front()->output_register_instance[i];
-
-				for (auto *pred : meta->preds)
-				{
-					// If we get the same instance, and we write to the value in this block,
-					// we know we have a feedback scenario, and we need a PHI node.
-					bool feedback =
-						(meta->block.preserve_registers & (1ull << i)) != 0 &&
-						pred->output_register_instance[i] == instance &&
-						(meta->block.write_registers & (1ull << i)) != 0;
-
-					if (feedback || pred->output_register_instance[i] != instance)
-					{
-						same_instance = false;
-						break;
-					}
-				}
-
-				if (!same_instance)
-				{
-					meta->need_phi_node |= 1ull << i;
-					meta->input_register_instance[i] = ++register_instance[i];
-				}
-				else
-				{
-					// It's all the same instance, inherit this information.
-					meta->input_register_instance[i] = instance;
-				}
-
-				meta->output_register_instance[i] = meta->input_register_instance[i];
-			}
-
-			if (meta->block.write_registers & (1ull << i))
-				meta->output_register_instance[i] = ++register_instance[i];
-		}
-	}
-}
-
-uint32_t Function::get_instances_for_register(unsigned index) const
-{
-	return register_instance[index] + 1;
 }
 
 BlockMeta *Function::analyze_from_entry_inner(Address addr)
@@ -122,7 +54,6 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 	auto *meta = meta_.get();
 	block_map[addr] = move(meta_);
 	backend->get_block_from_address(addr, meta->block);
-	meta->dirty_registers = meta->block.write_registers;
 
 	switch (meta->block.terminator)
 	{

@@ -127,16 +127,52 @@ static bool opcode_ends_block(Address addr)
 	}
 }
 
-static void read_register(Block &block, uint32_t reg)
+struct RegisterTracker
 {
-	if (!(block.write_registers & (1ull << reg)))
-		block.preserve_registers |= 1ull << reg;
-}
+	RegisterTracker(IRBuilder<> &builder_, Value *arg_)
+		: builder(builder_), arg(arg_)
+	{
+	}
 
-static void write_register(Block &block, uint32_t reg)
-{
-	block.write_registers |= 1ull << reg;
-}
+	void write(unsigned index, Value *value)
+	{
+		registers[index] = value;
+		dirty |= 1ull << index;
+	}
+
+	Value *read(unsigned index)
+	{
+		if (registers[index])
+			return registers[index];
+
+		auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, index);
+		registers[index] = builder.CreateLoad(ptr);
+		return registers[index];
+	}
+
+	void flush()
+	{
+		for (int i = 0; i < MaxRegisters; i++)
+		{
+			if (dirty & (1ull << i))
+			{
+				auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i);
+				builder.CreateStore(registers[i], ptr);
+			}
+		}
+		dirty = 0;
+	}
+
+	void invalidate()
+	{
+		memset(registers, 0, sizeof(registers));
+	}
+
+	IRBuilder<> &builder;
+	Value *arg;
+	Value *registers[MaxRegisters] = {};
+	uint64_t dirty = 0;
+};
 
 struct Backend : BlockAnalysisBackend, RecompilerBackend
 {
@@ -150,113 +186,59 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			auto &instr = IDAT[addr >> 2];
 			ends_block = opcode_ends_block(addr);
 
-			switch (instr.op)
-			{
-			case Op::Add:
-			case Op::Sub:
-			case Op::Or:
-			case Op::Xor:
-			case Op::And:
-			case Op::ShiftLeft:
-			case Op::ShiftRightArithmetic:
-			case Op::ShiftRightLogical:
-			case Op::Mul:
-			case Op::CMPSLessThan:
-			case Op::CMPULessThan:
-			{
-				read_register(block, instr.get_3op_ra());
-				read_register(block, instr.get_3op_rb());
-				write_register(block, instr.get_3op_rc());
-				break;
-			}
-
-			case Op::AddImm:
-			case Op::OrImm:
-			case Op::AndImm:
-			case Op::XorImm:
-			case Op::ShiftLeftImm:
-			case Op::ShiftRightArithmeticImm:
-			case Op::ShiftRightLogicalImm:
-			case Op::CMPULessThanImm:
-			case Op::CMPSLessThanImm:
-			case Op::MulImm:
-			{
-				read_register(block, instr.get_2op_imm_ra());
-				write_register(block, instr.get_2op_imm_rc());
-				break;
-			}
-
-			case Op::LoadImmediate:
-			case Op::LoadImmediateUpper:
-			{
-				write_register(block, instr.get_1op_imm_rc());
-				break;
-			}
-
-			case Op::BZ:
-			case Op::BNZ:
-			{
-				read_register(block, instr.get_1op_imm_rc());
-				break;
-			}
-
-			case Op::Call:
-				write_register(block, 63);
-				break;
-
-			case Op::BranchRegister:
-				read_register(block, instr.get_1op_rc());
-				break;
-
-			case Op::CallRegister:
-				read_register(block, instr.get_1op_rc());
-				write_register(block, 63);
-				break;
-
-			default:
-				std::abort();
-			}
-
-			addr += 4;
-
 			if (instr.op == Op::BZ)
 			{
 				if (instr.get_1op_imm_rc() == 0)
 				{
 					block.terminator = Terminator::DirectBranch;
 					block.static_address_targets[0] =
-						addr + int16_t(instr.arg & 0xffff) * 4;
+						addr + 4 + int16_t(instr.arg & 0xffff) * 4;
 				}
 				else
 				{
 					block.terminator = Terminator::SelectionBranch;
 					block.static_address_targets[0] =
-						addr + int16_t(instr.arg & 0xffff);
+						addr + 4 + int16_t(instr.arg & 0xffff);
 					block.static_address_targets[1] =
-						addr;
+						addr + 4;
 				}
 			}
 			else if (instr.op == Op::BNZ)
 			{
 				block.terminator = Terminator::SelectionBranch;
 				block.static_address_targets[0] =
-					addr + int16_t(instr.arg & 0xffff) * 4;
+					addr + 4 + int16_t(instr.arg & 0xffff) * 4;
 				block.static_address_targets[1] =
-					addr;
+					addr + 4;
 			}
 			else if (instr.op == Op::BranchRegister || instr.op == Op::CallRegister)
 				block.terminator = Terminator::Unwind;
+
+			// Conditional backwards branch into our current block. Split the block so we can get a clean loop.
+			if (ends_block &&
+			    block.terminator == Terminator::SelectionBranch &&
+			    block.static_address_targets[0] > block.block_start &&
+			    block.static_address_targets[0] < addr)
+			{
+				// Split the block.
+				block.block_end = block.static_address_targets[0];
+				block.terminator = Terminator::DirectBranch;
+				return;
+			}
+
+			addr += 4;
 		} while (!ends_block);
 
 		block.block_end = addr;
 	}
 
 	void recompile_basic_block(
-		Address start_addr, Address end_addr, uint64_t dirty_registers,
-		Recompiler *recompiler, BasicBlock *block, Value *arg, Value **registers) override
+		Address start_addr, Address end_addr,
+		Recompiler *recompiler, const Block &block, BasicBlock *bb, Value *args) override
 	{
-		IRBuilder<> builder(block);
-		auto &ctx = block->getContext();
+		IRBuilder<> builder(bb);
+		auto &ctx = bb->getContext();
+		RegisterTracker tracker(builder, args);
 
 		for (Address addr = start_addr; addr < end_addr; addr += 4)
 		{
@@ -265,174 +247,177 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			switch (instr.op)
 			{
 			case Op::Add:
-				registers[instr.get_3op_rc()] = builder.CreateAdd(
-					registers[instr.get_3op_ra()],
-					registers[instr.get_3op_rb()]);
+				tracker.write(instr.get_3op_rc(), builder.CreateAdd(
+					tracker.read(instr.get_3op_ra()),
+					tracker.read(instr.get_3op_rb())));
 				break;
 
 			case Op::Sub:
-				registers[instr.get_3op_rc()] = builder.CreateSub(
-					registers[instr.get_3op_ra()],
-					registers[instr.get_3op_rb()]);
+				tracker.write(instr.get_3op_rc(), builder.CreateSub(
+					tracker.read(instr.get_3op_ra()),
+					tracker.read(instr.get_3op_rb())));
 				break;
 
 			case Op::Or:
-				registers[instr.get_3op_rc()] = builder.CreateOr(
-					registers[instr.get_3op_ra()],
-					registers[instr.get_3op_rb()]);
+				tracker.write(instr.get_3op_rc(), builder.CreateOr(
+					tracker.read(instr.get_3op_ra()),
+					tracker.read(instr.get_3op_rb())));
 				break;
 
 			case Op::Xor:
-				registers[instr.get_3op_rc()] = builder.CreateXor(
-					registers[instr.get_3op_ra()],
-					registers[instr.get_3op_rb()]);
+				tracker.write(instr.get_3op_rc(), builder.CreateXor(
+					tracker.read(instr.get_3op_ra()),
+					tracker.read(instr.get_3op_rb())));
 				break;
 
 			case Op::And:
-				registers[instr.get_3op_rc()] = builder.CreateAnd(
-					registers[instr.get_3op_ra()],
-					registers[instr.get_3op_rb()]);
+				tracker.write(instr.get_3op_rc(), builder.CreateAnd(
+					tracker.read(instr.get_3op_ra()),
+					tracker.read(instr.get_3op_rb())));
 				break;
 
 			case Op::Mul:
-				registers[instr.get_3op_rc()] = builder.CreateMul(
-					registers[instr.get_3op_ra()],
-					registers[instr.get_3op_rb()]);
+				tracker.write(instr.get_3op_rc(), builder.CreateMul(
+					tracker.read(instr.get_3op_ra()),
+					tracker.read(instr.get_3op_rb())));
 				break;
 
 			case Op::ShiftLeft:
-				registers[instr.get_3op_rc()] = builder.CreateShl(
-					registers[instr.get_3op_ra()],
-					builder.CreateAnd(registers[instr.get_3op_rb()], ConstantInt::get(Type::getInt32Ty(ctx), 31)));
+				tracker.write(instr.get_3op_rc(), builder.CreateShl(
+					tracker.read(instr.get_3op_ra()),
+					builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
 				break;
 
 			case Op::ShiftRightLogical:
-				registers[instr.get_3op_rc()] = builder.CreateLShr(
-					registers[instr.get_3op_ra()],
-					builder.CreateAnd(registers[instr.get_3op_rb()], ConstantInt::get(Type::getInt32Ty(ctx), 31)));
+				tracker.write(instr.get_3op_rc(), builder.CreateLShr(
+					tracker.read(instr.get_3op_ra()),
+					builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
 				break;
 
 			case Op::ShiftRightArithmetic:
-				registers[instr.get_3op_rc()] = builder.CreateAShr(
-					registers[instr.get_3op_ra()],
-					builder.CreateAnd(registers[instr.get_3op_rb()], ConstantInt::get(Type::getInt32Ty(ctx), 31)));
+				tracker.write(instr.get_3op_rc(), builder.CreateAShr(
+					tracker.read(instr.get_3op_ra()),
+					builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
 				break;
 
 			case Op::CMPSLessThan:
-				registers[instr.get_3op_rc()] =
-					builder.CreateSelect(builder.CreateICmpSLT(registers[instr.get_3op_ra()], registers[instr.get_3op_rb()]),
+				tracker.write(instr.get_3op_rc(),
+					builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
 					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 0)));
 				break;
 
 			case Op::CMPULessThan:
-				registers[instr.get_3op_rc()] =
-					builder.CreateSelect(builder.CreateICmpULT(registers[instr.get_3op_ra()], registers[instr.get_3op_rb()]),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+				tracker.write(instr.get_3op_rc(),
+				              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
+				                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+				                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
 				break;
 
 			case Op::AddImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateAdd(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff)));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateAdd(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
 				break;
 
 			case Op::OrImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateOr(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateOr(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
 				break;
 
 			case Op::AndImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateAnd(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateAnd(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
 				break;
 
 			case Op::XorImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateXor(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateXor(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
 				break;
 
 			case Op::ShiftLeftImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateShl(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateShl(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
 				break;
 
 			case Op::ShiftRightLogicalImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateLShr(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateLShr(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
 				break;
 
 			case Op::ShiftRightArithmeticImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateAShr(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateAShr(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
 				break;
 
 			case Op::MulImm:
-				registers[instr.get_2op_imm_rc()] = builder.CreateMul(
-					registers[instr.get_2op_imm_ra()],
-					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff)));
+				tracker.write(instr.get_2op_imm_rc(), builder.CreateMul(
+					tracker.read(instr.get_2op_imm_ra()),
+					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
 				break;
 
 			case Op::CMPSLessThanImm:
-				registers[instr.get_2op_imm_rc()] =
-					builder.CreateSelect(builder.CreateICmpSLT(registers[instr.get_2op_imm_ra()], ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
+				tracker.write(instr.get_2op_imm_rc(),
+					builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
 					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+					                     ConstantInt::get(Type::getInt32Ty(ctx), 0)));
 				break;
 
 			case Op::CMPULessThanImm:
-				registers[instr.get_3op_rc()] =
-					builder.CreateSelect(builder.CreateICmpULT(registers[instr.get_2op_imm_ra()], ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 0));
+				tracker.write(instr.get_2op_imm_rc(),
+				              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))),
+				                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+				                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
 				break;
 
 			case Op::LoadImmediate:
-				registers[instr.get_1op_imm_rc()] = ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff));
+				tracker.write(instr.get_1op_imm_rc(), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
 				break;
 
 			case Op::LoadImmediateUpper:
-				registers[instr.get_1op_imm_rc()] = ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff) << 16);
+				tracker.write(instr.get_1op_imm_rc(), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff) << 16));
 				break;
 
 			case Op::BNZ:
+				tracker.flush();
 				BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
 				                   recompiler->get_block_for_address(addr + 4),
-				                   builder.CreateICmpNE(registers[instr.get_1op_imm_rc()], ConstantInt::get(Type::getInt32Ty(ctx), 0)), block);
+				                   builder.CreateICmpNE(tracker.read(instr.get_1op_imm_rc()), ConstantInt::get(Type::getInt32Ty(ctx), 0)), bb);
 				break;
 
 			case Op::BZ:
+				tracker.flush();
 				BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
 				                   recompiler->get_block_for_address(addr + 4),
-				                   builder.CreateICmpEQ(registers[instr.get_1op_imm_rc()], ConstantInt::get(Type::getInt32Ty(ctx), 0)), block);
+				                   builder.CreateICmpEQ(tracker.read(instr.get_1op_imm_rc()), ConstantInt::get(Type::getInt32Ty(ctx), 0)), bb);
 				break;
 
 			case Op::Call:
-				registers[63] = ConstantInt::get(Type::getInt32Ty(ctx), addr + 4);
+				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
+				tracker.flush();
+				// Call
+				tracker.invalidate();
 				break;
 
-			case Op::BranchRegister:
 			case Op::CallRegister:
-				for (int i = 0; i < MaxRegisters; i++)
-				{
-					if (dirty_registers & (1ull << i))
-					{
-						assert(registers[i]);
-						auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i);
-						builder.CreateStore(registers[i], ptr);
-					}
-				}
+				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
+				// Fallthrough.
+			case Op::BranchRegister:
+				tracker.flush();
+				// Call
 				builder.CreateRetVoid();
 				break;
 			}
 		}
+
+		if (block.terminator == Terminator::DirectBranch)
+			BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
 	}
 };
 

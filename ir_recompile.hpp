@@ -18,11 +18,10 @@ public:
 	virtual ~RecompilerBackend() = default;
 	virtual void recompile_basic_block(
 		Address start_addr, Address end_addr,
-		uint64_t dirty_registers,
 		Recompiler *recompiler,
+		const Block &block,
 		llvm::BasicBlock *basic_block,
-		llvm::Value *arg,
-		llvm::Value **registers) = 0;
+		llvm::Value *arg) = 0;
 };
 
 class Recompiler
