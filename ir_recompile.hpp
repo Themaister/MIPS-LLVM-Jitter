@@ -42,8 +42,8 @@ struct RegisterTracker
 		if (registers[index])
 			return registers[index];
 
-		auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, index);
-		registers[index] = builder.CreateLoad(ptr);
+		auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, index, std::string("Reg") + std::to_string(index) + "Ptr");
+		registers[index] = builder.CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
 		return registers[index];
 	}
 
@@ -53,7 +53,7 @@ struct RegisterTracker
 		{
 			if (dirty & (1ull << i))
 			{
-				auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i);
+				auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i, std::string("Reg") + std::to_string(i) + "Ptr");
 				builder.CreateStore(registers[i], ptr);
 			}
 		}
@@ -63,6 +63,11 @@ struct RegisterTracker
 	void invalidate()
 	{
 		memset(registers, 0, sizeof(registers));
+	}
+
+	std::string get_twine(unsigned index)
+	{
+		return std::string("Reg") + std::to_string(index) + "_";
 	}
 
 	llvm::IRBuilder<> &builder;

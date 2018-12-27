@@ -360,131 +360,131 @@ void Backend::recompile_basic_block(
 		case Op::Add:
 			tracker.write(instr.get_3op_rc(), builder.CreateAdd(
 				tracker.read(instr.get_3op_ra()),
-				tracker.read(instr.get_3op_rb())));
+				tracker.read(instr.get_3op_rb()), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::Sub:
 			tracker.write(instr.get_3op_rc(), builder.CreateSub(
 				tracker.read(instr.get_3op_ra()),
-				tracker.read(instr.get_3op_rb())));
+				tracker.read(instr.get_3op_rb()), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::Or:
 			tracker.write(instr.get_3op_rc(), builder.CreateOr(
 				tracker.read(instr.get_3op_ra()),
-				tracker.read(instr.get_3op_rb())));
+				tracker.read(instr.get_3op_rb()), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::Xor:
 			tracker.write(instr.get_3op_rc(), builder.CreateXor(
 				tracker.read(instr.get_3op_ra()),
-				tracker.read(instr.get_3op_rb())));
+				tracker.read(instr.get_3op_rb()), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::And:
 			tracker.write(instr.get_3op_rc(), builder.CreateAnd(
 				tracker.read(instr.get_3op_ra()),
-				tracker.read(instr.get_3op_rb())));
+				tracker.read(instr.get_3op_rb()), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::Mul:
 			tracker.write(instr.get_3op_rc(), builder.CreateMul(
 				tracker.read(instr.get_3op_ra()),
-				tracker.read(instr.get_3op_rb())));
+				tracker.read(instr.get_3op_rb()), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::ShiftLeft:
 			tracker.write(instr.get_3op_rc(), builder.CreateShl(
 				tracker.read(instr.get_3op_ra()),
-				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
+				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31)), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::ShiftRightLogical:
 			tracker.write(instr.get_3op_rc(), builder.CreateLShr(
 				tracker.read(instr.get_3op_ra()),
-				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
+				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31)), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::ShiftRightArithmetic:
 			tracker.write(instr.get_3op_rc(), builder.CreateAShr(
 				tracker.read(instr.get_3op_ra()),
-				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
+				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31)), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::CMPSLessThan:
 			tracker.write(instr.get_3op_rc(),
 			              builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
 			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::CMPULessThan:
 			tracker.write(instr.get_3op_rc(),
 			              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
 			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0), tracker.get_twine(instr.get_3op_rc())));
 			break;
 
 		case Op::AddImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateAdd(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
+				ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff)), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::OrImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateOr(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
+				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::AndImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateAnd(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
+				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::XorImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateXor(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
+				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::ShiftLeftImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateShl(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
+				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::ShiftRightLogicalImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateLShr(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
+				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::ShiftRightArithmeticImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateAShr(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
+				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::MulImm:
 			tracker.write(instr.get_2op_imm_rc(), builder.CreateMul(
 				tracker.read(instr.get_2op_imm_ra()),
-				ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
+				ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff)), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::CMPSLessThanImm:
 			tracker.write(instr.get_2op_imm_rc(),
 			              builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
 			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::CMPULessThanImm:
 			tracker.write(instr.get_2op_imm_rc(),
 			              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))),
 			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0), tracker.get_twine(instr.get_2op_imm_rc())));
 			break;
 
 		case Op::LoadImmediate:
@@ -539,7 +539,7 @@ void Backend::recompile_basic_block(
 			auto *bb_call = BasicBlock::Create(ctx, "IndirectJumpPath", recompiler->get_current_function());
 			auto *bb_return = BasicBlock::Create(ctx, "IndirectJumpReturn", recompiler->get_current_function());
 			builder.SetInsertPoint(bb);
-			builder.CreateCondBr(builder.CreateICmpNE(call, ConstantPointerNull::get(static_cast<PointerType *>(call->getType()))),
+			builder.CreateCondBr(builder.CreateICmpNE(call, ConstantPointerNull::get(static_cast<PointerType *>(call->getType())), "jump_addr_cmp"),
 			                     bb_call, bb_return);
 
 			builder.SetInsertPoint(bb_call);

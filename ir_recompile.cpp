@@ -49,7 +49,7 @@ llvm::Value *Recompiler::create_call(llvm::Value *addr, Address expected_return)
 		addr,
 		llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), expected_return)
 	};
-	return builder.CreateCall(calls.call, values);
+	return builder.CreateCall(calls.call, values, "call_addr");
 }
 
 llvm::Value *Recompiler::create_jump_indirect(llvm::Value *value)
@@ -70,7 +70,7 @@ llvm::Value *Recompiler::create_jump_indirect(llvm::Value *value)
 	}
 
 	llvm::Value *values[] = { argument, value };
-	return builder.CreateCall(calls.jump_indirect, values);
+	return builder.CreateCall(calls.jump_indirect, values, "jump_addr");
 }
 
 void Recompiler::create_store32(llvm::Value *addr, llvm::Value *value)
