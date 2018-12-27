@@ -106,7 +106,14 @@ static const Instr IDAT[] = {
 	{ Op::AddImm, OP_2REG_IMM(60, 60, 1) },
 	{ Op::CMPSLessThan, OP_3REG(61, 60, 3) },
 	{ Op::BNZ, OP_1REG_IMM(61, -4) },
-	{ Op::Call, OP_ABS(256) },
+	{ Op::Call, OP_ABS(9 * 4) },
+	{ Op::Call, OP_ABS(11 * 4) },
+	{ Op::BranchRegister, OP_1REG(63) },
+
+	{ Op::AddImm, OP_2REG_IMM(1, 1, 1000) }, // 9
+	{ Op::BranchRegister, OP_1REG(63) },
+
+	{ Op::AddImm, OP_2REG_IMM(1, 1, 2000) }, // 11
 	{ Op::BranchRegister, OP_1REG(63) },
 };
 
@@ -127,9 +134,11 @@ static bool opcode_ends_block(Address addr)
 	}
 }
 
+using StubCallPtr = void (*)(RegisterState *);
+
 extern "C" {
-static void backend_call_addr(RegisterState *regs, Address addr, Address expected_addr);
-static void backend_jump_addr(RegisterState *regs, Address addr);
+static StubCallPtr backend_call_addr(RegisterState *regs, Address addr, Address expected_addr);
+static StubCallPtr backend_jump_addr(RegisterState *regs, Address addr);
 static void backend_store32(RegisterState *regs, Address addr, uint32_t value);
 static void backend_store16(RegisterState *regs, Address addr, uint32_t value);
 static void backend_store8(RegisterState *regs, Address addr, uint32_t value);
@@ -187,18 +196,20 @@ struct Backend : RegisterState, BlockAnalysisBackend, RecompilerBackend
 
 		if (setjmp(jump_buffer))
 			return exit_pc;
-		call(addr);
+
+		auto *ptr = call(addr);
+		ptr(this);
 
 		// Should not be reached.
 		return exit_pc;
 	}
 
-	void call(Address addr) noexcept
+	StubCallPtr call(Address addr) noexcept
 	{
 		auto itr = blocks.find(addr);
 		if (itr != end(blocks))
 		{
-			itr->second.call(this);
+			return itr->second.call;
 		}
 		else
 		{
@@ -206,16 +217,17 @@ struct Backend : RegisterState, BlockAnalysisBackend, RecompilerBackend
 			JITTIR::Recompiler recompiler;
 			func.set_backend(this);
 			recompiler.set_backend(this);
+			recompiler.set_jitter(&jitter);
 			func.analyze_from_entry(addr);
 			auto result = recompiler.recompile_function(func);
 			if (!result.call)
 				std::abort();
 			blocks.emplace(addr, result);
-			result.call(this);
+			return result.call;
 		}
 	}
 
-	void call_addr(Address addr, Address expected_addr) noexcept
+	StubCallPtr call_addr(Address addr, Address expected_addr) noexcept
 	{
 		if (return_stack_count >= 1024)
 		{
@@ -225,22 +237,26 @@ struct Backend : RegisterState, BlockAnalysisBackend, RecompilerBackend
 
 		return_stack[return_stack_count++] = expected_addr;
 		stack_depth++;
-		call(addr);
+		return call(addr);
 	}
 
-	void jump_addr(Address addr) noexcept
+	StubCallPtr jump_addr(Address addr) noexcept
 	{
 		if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
 		{
 			stack_depth--;
 			return_stack[return_stack_count--];
+			return nullptr;
 		}
 		else
 		{
 			stack_depth++;
 			if (stack_depth > 2048)
+			{
+				exit_pc = addr;
 				longjmp(jump_buffer, ExitTooDeepJumpStack);
-			call(addr);
+			}
+			return call(addr);
 		}
 	}
 
@@ -260,7 +276,6 @@ struct Backend : RegisterState, BlockAnalysisBackend, RecompilerBackend
 
 Backend::Backend()
 {
-	Jitter::init_global();
 	jitter.add_external_symbol("__recompiler_call_addr", backend_call_addr);
 	jitter.add_external_symbol("__recompiler_jump_indirect", backend_jump_addr);
 	jitter.add_external_symbol("__recompiler_store32", backend_store32);
@@ -495,22 +510,44 @@ void Backend::recompile_basic_block(
 			break;
 
 		case Op::Call:
+		{
 			tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
 			tracker.flush();
-			recompiler->create_call(instr.arg, addr + 4);
+			auto *call = recompiler->create_call(instr.arg, addr + 4);
+			Value *values[] = { args };
+			builder.SetInsertPoint(bb);
+			builder.CreateCall(call, values);
 			tracker.invalidate();
 			break;
+		}
 
 		case Op::CallRegister:
+		{
 			tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
 			tracker.flush();
-			recompiler->create_call(tracker.read(instr.get_1op_rc()), addr + 4);
+			auto *call = recompiler->create_call(tracker.read(instr.get_1op_rc()), addr + 4);
+			Value *values[] = { args };
+			builder.SetInsertPoint(bb);
+			builder.CreateCall(call, values);
 			tracker.invalidate();
 			break;
+		}
 
 		case Op::BranchRegister:
 			tracker.flush();
-			recompiler->create_jump_indirect(tracker.read(instr.get_1op_rc()));
+			auto *call = recompiler->create_jump_indirect(tracker.read(instr.get_1op_rc()));
+			auto *bb_call = BasicBlock::Create(ctx, "IndirectJumpPath", recompiler->get_current_function());
+			auto *bb_return = BasicBlock::Create(ctx, "IndirectJumpReturn", recompiler->get_current_function());
+			builder.SetInsertPoint(bb);
+			builder.CreateCondBr(builder.CreateICmpNE(call, ConstantPointerNull::get(static_cast<PointerType *>(call->getType()))),
+			                     bb_call, bb_return);
+
+			builder.SetInsertPoint(bb_call);
+			Value *values[] = { args };
+			builder.CreateCall(call, values);
+			BranchInst::Create(bb_return, bb_call);
+
+			builder.SetInsertPoint(bb_return);
 			builder.CreateRetVoid();
 			break;
 		}
@@ -521,14 +558,14 @@ void Backend::recompile_basic_block(
 }
 
 extern "C" {
-static void backend_call_addr(RegisterState *regs, Address addr, Address expected_addr)
+static StubCallPtr backend_call_addr(RegisterState *regs, Address addr, Address expected_addr)
 {
-	static_cast<Backend *>(regs)->call_addr(addr, expected_addr);
+	return static_cast<Backend *>(regs)->call_addr(addr, expected_addr);
 }
 
-static void backend_jump_addr(RegisterState *regs, Address addr)
+static StubCallPtr backend_jump_addr(RegisterState *regs, Address addr)
 {
-	static_cast<Backend *>(regs)->jump_addr(addr);
+	return static_cast<Backend *>(regs)->jump_addr(addr);
 }
 
 static void backend_store32(RegisterState *regs, Address addr, uint32_t value)

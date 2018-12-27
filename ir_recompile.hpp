@@ -90,10 +90,11 @@ public:
 
 	Result recompile_function(const Function &function);
 	llvm::BasicBlock *get_block_for_address(Address addr);
+	llvm::Function *get_current_function();
 
-	void create_call(Address addr, Address expected_return);
-	void create_call(llvm::Value *addr, Address expected_return);
-	void create_jump_indirect(llvm::Value *addr);
+	llvm::Value *create_call(Address addr, Address expected_return);
+	llvm::Value *create_call(llvm::Value *addr, Address expected_return);
+	llvm::Value *create_jump_indirect(llvm::Value *addr);
 	void create_store32(llvm::Value *addr, llvm::Value *value);
 	void create_store16(llvm::Value *addr, llvm::Value *value);
 	void create_store8(llvm::Value *addr, llvm::Value *value);
@@ -122,5 +123,6 @@ private:
 	llvm::Value *argument = nullptr;
 	llvm::BasicBlock *bb = nullptr;
 	llvm::Module *module = nullptr;
+	llvm::Function *function = nullptr;
 };
 }

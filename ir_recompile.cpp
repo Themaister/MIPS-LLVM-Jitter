@@ -20,36 +20,26 @@ llvm::BasicBlock *Recompiler::get_block_for_address(Address addr)
 	return address_to_basic_block.find(addr)->second;
 }
 
-void Recompiler::create_call(Address addr, Address expected_return)
+llvm::Value *Recompiler::create_call(Address addr, Address expected_return)
 {
 	llvm::IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
-
-	if (!calls.call)
-	{
-		llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx), llvm::Type::getInt32Ty(ctx), llvm::Type::getInt32Ty(ctx) };
-		auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
-		calls.call = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
-		                                    "__recompiler_call_addr", module);
-	}
-
-	llvm::Value *values[] = {
-		argument,
-		llvm::ConstantInt::get(llvm::Type::getInt32Ty(builder.getContext()), addr),
-		llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), expected_return)
-	};
-	builder.CreateCall(calls.call, values);
+	return create_call(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), addr), expected_return);
 }
 
-void Recompiler::create_call(llvm::Value *addr, Address expected_return)
+llvm::Value *Recompiler::create_call(llvm::Value *addr, Address expected_return)
 {
 	llvm::IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
 	if (!calls.call)
 	{
+		llvm::Type *stub_types[] = { llvm::Type::getInt32PtrTy(ctx) };
+		llvm::FunctionType *stub_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), stub_types, false);
+		llvm::PointerType *stub_ptr_type = llvm::PointerType::get(stub_type, 0);
+
 		llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx), llvm::Type::getInt32Ty(ctx), llvm::Type::getInt32Ty(ctx) };
-		auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
+		auto *function_type = llvm::FunctionType::get(stub_ptr_type, types, false);
 		calls.call = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
 		                                    "__recompiler_call_addr", module);
 	}
@@ -59,24 +49,28 @@ void Recompiler::create_call(llvm::Value *addr, Address expected_return)
 		addr,
 		llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), expected_return)
 	};
-	builder.CreateCall(calls.call, values);
+	return builder.CreateCall(calls.call, values);
 }
 
-void Recompiler::create_jump_indirect(llvm::Value *value)
+llvm::Value *Recompiler::create_jump_indirect(llvm::Value *value)
 {
 	llvm::IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
 	if (!calls.jump_indirect)
 	{
+		llvm::Type *stub_types[] = { llvm::Type::getInt32PtrTy(ctx) };
+		llvm::FunctionType *stub_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), stub_types, false);
+		llvm::PointerType *stub_ptr_type = llvm::PointerType::get(stub_type, 0);
+
 		llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx), llvm::Type::getInt32Ty(ctx) };
-		auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
+		auto *function_type = llvm::FunctionType::get(stub_ptr_type, types, false);
 		calls.jump_indirect = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
 		                                             "__recompiler_jump_indirect", module);
 	}
 
 	llvm::Value *values[] = { argument, value };
-	builder.CreateCall(calls.jump_indirect, values);
+	return builder.CreateCall(calls.jump_indirect, values);
 }
 
 void Recompiler::create_store32(llvm::Value *addr, llvm::Value *value)
@@ -181,6 +175,11 @@ llvm::Value *Recompiler::create_load8(llvm::Value *addr)
 	return builder.CreateCall(calls.load8, values);
 }
 
+llvm::Function *Recompiler::get_current_function()
+{
+	return function;
+}
+
 Recompiler::Result Recompiler::recompile_function(const Function &function)
 {
 	auto &visit_order = function.get_visit_order();
@@ -196,6 +195,7 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 	                                    to_string(visit_order.front()->block.block_start),
 	                                    module.get());
 	argument = &func->args().begin()[0];
+	this->function = func;
 
 	// Allocate basic blocks.
 	vector<llvm::BasicBlock *> basic_blocks;

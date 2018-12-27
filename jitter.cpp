@@ -45,11 +45,21 @@ void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbo
 	externals[name] = symbol;
 }
 
-Jitter::Jitter()
-#ifndef JITTER_LLVM_VERSION_LEGACY
-: context(std::make_unique<LLVMContext>())
-#endif
+struct JitterInit
 {
+	JitterInit()
+	{
+		Jitter::init_global();
+	}
+};
+
+Jitter::Jitter()
+{
+	static JitterInit jitter_init;
+
+#ifndef JITTER_LLVM_VERSION_LEGACY
+	context = std::make_unique<LLVMContext>();
+#endif
 	execution_session = std::make_unique<ExecutionSession>();
 	execution_session->setErrorReporter([](Error error) {
 		errs() << "Error: " << error << "\n";
