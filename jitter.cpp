@@ -96,6 +96,8 @@ Jitter::Jitter()
 
 	auto host = JITTargetMachineBuilder::detectHost();
 	target_machine = cantFail(host->createTargetMachine());
+	target_machine->setOptLevel(CodeGenOpt::Level::Default);
+
 #ifdef JITTER_LLVM_VERSION_LEGACY
 	data_layout = std::make_unique<DataLayout>(target_machine->createDataLayout());
 #else
