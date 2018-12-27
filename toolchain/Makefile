@@ -10,16 +10,10 @@ CRT_OBJECTS := start.o
 C_FILES := $(wildcard *.c)
 C_OBJECTS := $(C_FILES:.c=.o)
 
-all: test.text test.data
-
-test.text: test
-	$(OBJCOPY) -j .text $< $@ -O binary
-
-test.data: test
-	$(OBJCOPY) -j .data $< $@ -O binary
+all: test
 
 test: $(CRT_OBJECTS) $(C_OBJECTS)
-	$(LD) -o $@ $(CRT_OBJECTS) $(C_OBJECTS) -T link.T
+	$(LD) -o $@ $(CRT_OBJECTS) $(C_OBJECTS)
 
 %.o: %.s
 	$(AS) -o $@ $< $(ASFLAGS)
@@ -28,7 +22,7 @@ test: $(CRT_OBJECTS) $(C_OBJECTS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 clean:
-	rm -f test test.text test.data $(CRT_OBJECTS) $(C_OBJECTS)
+	rm -f test $(CRT_OBJECTS) $(C_OBJECTS)
 
 .PHONY: all clean
 
