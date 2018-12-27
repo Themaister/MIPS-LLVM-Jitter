@@ -20,20 +20,45 @@ llvm::BasicBlock *Recompiler::get_block_for_address(Address addr)
 	return address_to_basic_block.find(addr)->second;
 }
 
-void Recompiler::create_call(Address addr)
+void Recompiler::create_call(Address addr, Address expected_return)
 {
 	llvm::IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
 	if (!calls.call)
 	{
-		llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx), llvm::Type::getInt32Ty(ctx) };
+		llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx), llvm::Type::getInt32Ty(ctx), llvm::Type::getInt32Ty(ctx) };
 		auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
 		calls.call = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
 		                                    "__recompiler_call_addr", module);
 	}
 
-	llvm::Value *values[] = { argument, llvm::ConstantInt::get(llvm::Type::getInt32Ty(builder.getContext()), addr) };
+	llvm::Value *values[] = {
+		argument,
+		llvm::ConstantInt::get(llvm::Type::getInt32Ty(builder.getContext()), addr),
+		llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), expected_return)
+	};
+	builder.CreateCall(calls.call, values);
+}
+
+void Recompiler::create_call(llvm::Value *addr, Address expected_return)
+{
+	llvm::IRBuilder<> builder(bb);
+	auto &ctx = builder.getContext();
+
+	if (!calls.call)
+	{
+		llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx), llvm::Type::getInt32Ty(ctx), llvm::Type::getInt32Ty(ctx) };
+		auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
+		calls.call = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+		                                    "__recompiler_call_addr", module);
+	}
+
+	llvm::Value *values[] = {
+		argument,
+		addr,
+		llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), expected_return)
+	};
 	builder.CreateCall(calls.call, values);
 }
 
@@ -203,7 +228,7 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 	}
 
 	result.handle = jitter->add_module(move(module));
-	result.call = (void (*)(void *))jitter->get_symbol_address(to_string(visit_order.front()->block.block_start));
+	result.call = (void (*)(RegisterState *))jitter->get_symbol_address(to_string(visit_order.front()->block.block_start));
 	return result;
 }
 }

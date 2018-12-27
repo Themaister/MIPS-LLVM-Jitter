@@ -174,7 +174,7 @@ struct RegisterTracker
 	uint64_t dirty = 0;
 };
 
-struct Backend : BlockAnalysisBackend, RecompilerBackend
+struct Backend : RegisterState, BlockAnalysisBackend, RecompilerBackend
 {
 	void get_block_from_address(Address addr, Block &block) override
 	{
@@ -364,9 +364,9 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 
 			case Op::CMPSLessThanImm:
 				tracker.write(instr.get_2op_imm_rc(),
-					builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+				              builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
+				                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+				                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
 				break;
 
 			case Op::CMPULessThanImm:
@@ -401,13 +401,17 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			case Op::Call:
 				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
 				tracker.flush();
-				recompiler->create_call(instr.arg);
+				recompiler->create_call(instr.arg, addr + 4);
 				tracker.invalidate();
 				break;
 
 			case Op::CallRegister:
 				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
-				// Fallthrough.
+				tracker.flush();
+				recompiler->create_call(tracker.read(instr.get_1op_rc()), addr + 4);
+				tracker.invalidate();
+				break;
+
 			case Op::BranchRegister:
 				tracker.flush();
 				recompiler->create_jump_indirect(tracker.read(instr.get_1op_rc()));
@@ -421,42 +425,42 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 	}
 };
 
-static void call_addr(void *userdata, Address addr)
+static void call_addr(RegisterState *regs, Address addr, Address expected_addr)
 {
 
 }
 
-static void jump_addr(void *userdata, Address addr)
+static void jump_addr(RegisterState *regs, Address addr)
 {
 
 }
 
-static void store32(void *userdata, Address addr, uint32_t value)
+static void store32(RegisterState *regs, Address addr, uint32_t value)
 {
 
 }
 
-static void store16(void *userdata, Address addr, uint32_t value)
+static void store16(RegisterState *regs, Address addr, uint32_t value)
 {
 
 }
 
-static void store8(void *userdata, Address addr, uint32_t value)
+static void store8(RegisterState *regs, Address addr, uint32_t value)
 {
 
 }
 
-static uint32_t load32(void *userdata, Address addr)
+static uint32_t load32(RegisterState *regs, Address addr)
 {
 
 }
 
-static uint16_t load16(void *userdata, Address addr)
+static uint16_t load16(RegisterState *regs, Address addr)
 {
 
 }
 
-static uint8_t load8(void *userdata, Address addr)
+static uint8_t load8(RegisterState *regs, Address addr)
 {
 
 }
@@ -484,8 +488,7 @@ int main()
 	func.analyze_from_entry(0);
 	auto result = recompiler.recompile_function(func);
 
-	int32_t registers[MaxRegisters] = {};
-	registers[3] = 100;
-	result.call(registers);
-	result.call(registers);
+	back.scalar_registers[3] = 100;
+	result.call(&back);
+	result.call(&back);
 }

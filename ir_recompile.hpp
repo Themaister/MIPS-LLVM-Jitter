@@ -24,6 +24,11 @@ public:
 		llvm::Value *arg) = 0;
 };
 
+struct RegisterState
+{
+	int32_t scalar_registers[MaxRegisters] = {};
+};
+
 class Recompiler
 {
 public:
@@ -33,13 +38,14 @@ public:
 	struct Result
 	{
 		Jitter::ModuleHandle handle;
-		void (*call)(void *);
+		void (*call)(RegisterState *);
 	};
 
 	Result recompile_function(const Function &function);
 	llvm::BasicBlock *get_block_for_address(Address addr);
 
-	void create_call(Address addr);
+	void create_call(Address addr, Address expected_return);
+	void create_call(llvm::Value *addr, Address expected_return);
 	void create_jump_indirect(llvm::Value *addr);
 	void create_store32(llvm::Value *addr, llvm::Value *value);
 	void create_store16(llvm::Value *addr, llvm::Value *value);
@@ -53,7 +59,6 @@ public:
 private:
 	RecompilerBackend *backend = nullptr;
 	Jitter *jitter = nullptr;
-
 	std::unordered_map<Address, llvm::BasicBlock *> address_to_basic_block;
 
 	struct
