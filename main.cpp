@@ -401,7 +401,7 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			case Op::Call:
 				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
 				tracker.flush();
-				// Call
+				recompiler->create_call(instr.arg);
 				tracker.invalidate();
 				break;
 
@@ -410,7 +410,7 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 				// Fallthrough.
 			case Op::BranchRegister:
 				tracker.flush();
-				// Call
+				recompiler->create_jump_indirect(tracker.read(instr.get_1op_rc()));
 				builder.CreateRetVoid();
 				break;
 			}
@@ -420,6 +420,46 @@ struct Backend : BlockAnalysisBackend, RecompilerBackend
 			BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
 	}
 };
+
+static void call_addr(void *userdata, Address addr)
+{
+
+}
+
+static void jump_addr(void *userdata, Address addr)
+{
+
+}
+
+static void store32(void *userdata, Address addr, uint32_t value)
+{
+
+}
+
+static void store16(void *userdata, Address addr, uint32_t value)
+{
+
+}
+
+static void store8(void *userdata, Address addr, uint32_t value)
+{
+
+}
+
+static uint32_t load32(void *userdata, Address addr)
+{
+
+}
+
+static uint16_t load16(void *userdata, Address addr)
+{
+
+}
+
+static uint8_t load8(void *userdata, Address addr)
+{
+
+}
 
 int main()
 {
@@ -431,6 +471,15 @@ int main()
 	func.set_backend(&back);
 	recompiler.set_backend(&back);
 	recompiler.set_jitter(&jitter);
+
+	jitter.add_external_symbol("__recompiler_call_addr", call_addr);
+	jitter.add_external_symbol("__recompiler_jump_indirect", jump_addr);
+	jitter.add_external_symbol("__recompiler_store32", store32);
+	jitter.add_external_symbol("__recompiler_store16", store16);
+	jitter.add_external_symbol("__recompiler_store8", store8);
+	jitter.add_external_symbol("__recompiler_load32", load32);
+	jitter.add_external_symbol("__recompiler_load16", load16);
+	jitter.add_external_symbol("__recompiler_load8", load8);
 
 	func.analyze_from_entry(0);
 	auto result = recompiler.recompile_function(func);
