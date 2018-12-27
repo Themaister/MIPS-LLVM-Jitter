@@ -55,6 +55,10 @@ add_executable(jitter-test main.cpp)
 target_link_libraries(jitter-test PRIVATE jitter)
 target_compile_options(jitter-test PRIVATE ${JITTER_CXX_FLAGS})
 
+add_executable(mipsvm mipsvm.cpp)
+target_link_libraries(mipsvm PRIVATE jitter)
+target_compile_options(mipsvm PRIVATE ${JITTER_CXX_FLAGS})
+
 target_compile_options(jitter PRIVATE ${JITTER_CXX_FLAGS})
 target_include_directories(jitter PUBLIC ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(jitter PUBLIC ${LLVM_DEFINITIONS})
