@@ -189,6 +189,259 @@ static uint16_t backend_load16(RegisterState *regs, Address addr);
 static uint8_t backend_load8(RegisterState *regs, Address addr);
 }
 
+enum class Op
+{
+	Invalid,
+	SLL,
+	SRL,
+	SRA,
+	SLLV,
+	SRLV,
+	SRAV,
+	JR,
+	JALR,
+	SYSCALL,
+	BREAK,
+	MFHI,
+	MFLO,
+	MULT,
+	MULTU,
+	DIV,
+	DIVU,
+	ADD,
+	ADDU,
+	SUB,
+	SUBU,
+	AND,
+	OR,
+	XOR,
+	NOR,
+	SLT,
+	SLTU,
+	BLTZ,
+	BGEZ,
+	BLTZAL,
+	BGEZAL,
+	J,
+	JAL,
+	BEQ,
+	BNE,
+	BLEZ,
+	BGTZ,
+	ADDI,
+	ADDIU,
+	SLTI,
+	SLTIU,
+	ANDI,
+	ORI,
+	XORI,
+	LUI,
+	COP0,
+	COP1,
+	COP2,
+	COP3,
+	LB,
+	LH,
+	LWL,
+	LW,
+	LBU,
+	LHU,
+	LWR,
+	SB,
+	SH,
+	SWL,
+	SW,
+	SWR,
+	LWC0,
+	LWC1,
+	LWC2,
+	LWC3,
+	SWC0,
+	SWC1,
+	SWC2,
+	SWC3,
+};
+
+struct MIPSInstruction
+{
+	Op op;
+	uint8_t rs, rt, rd;
+	uint32_t imm;
+};
+
+static MIPSInstruction decode_mips_instruction(uint32_t word)
+{
+	MIPSInstruction instr = {};
+	instr.op = Op::Invalid;
+	uint8_t rs = (word >> 21) & 31;
+	uint8_t rt = (word >> 16) & 31;
+	uint8_t rd = (word >> 11) & 31;
+	uint8_t shamt = (word >> 6) & 31;
+	uint16_t imm16 = word & 0xffff;
+	uint16_t imm26 = word & ((1u << 26) - 1u);
+
+	instr.rs = rs;
+	instr.rt = rt;
+	instr.rd = rd;
+
+	switch (word >> 26)
+	{
+	case 1:
+		instr.rs = rs;
+		instr.imm = imm16;
+		switch (rt)
+		{
+		case 0:
+			instr.op = Op::BLTZ;
+			break;
+		case 1:
+			instr.op = Op::BGEZ;
+			break;
+		case 16:
+			instr.op = Op::BLTZAL;
+			break;
+		case 17:
+			instr.op = Op::BGEZAL;
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case 2:
+		instr.imm = imm26;
+		instr.op = Op::J;
+		break;
+
+	case 3:
+		instr.imm = imm26;
+		instr.op = Op::JAL;
+		break;
+
+	case 4:
+		instr.op = Op::BEQ;
+		instr.imm = imm16;
+		break;
+
+	case 5:
+		instr.op = Op::BNE;
+		instr.imm = imm16;
+		break;
+
+	case 6:
+		instr.op = Op::BLEZ;
+		instr.imm = imm16;
+		break;
+
+	case 7:
+		instr.op = Op::BGTZ;
+		instr.imm = imm16;
+		break;
+
+	case 8:
+		instr.op = Op::ADDI;
+		instr.imm = imm16;
+		break;
+
+	case 9:
+		instr.op = Op::ADDIU;
+		instr.imm = imm16;
+		break;
+
+	case 0xa:
+		instr.op = Op::SLTI;
+		instr.imm = imm16;
+		break;
+
+	case 0xb:
+		instr.op = Op::SLTIU;
+		instr.imm = imm16;
+		break;
+
+	case 0xc:
+		instr.op = Op::ANDI;
+		instr.imm = imm16;
+		break;
+
+	case 0xd:
+		instr.op = Op::ORI;
+		instr.imm = imm16;
+		break;
+
+	case 0xe:
+		instr.op = Op::XORI;
+		instr.imm = imm16;
+		break;
+
+	case 0xf:
+		instr.op = Op::LUI;
+		instr.imm = imm16;
+		break;
+
+	case 0x20:
+		instr.op = Op::LB;
+		instr.imm = imm16;
+		break;
+
+	case 0x21:
+		instr.op = Op::LH;
+		instr.imm = imm16;
+		break;
+
+	case 0x22:
+		instr.op = Op::LWL;
+		instr.imm = imm16;
+		break;
+
+	case 0x23:
+		instr.op = Op::LW;
+		instr.imm = imm16;
+		break;
+
+	case 0x24:
+		instr.op = Op::LBU;
+		instr.imm = imm16;
+		break;
+
+	case 0x25:
+		instr.op = Op::LHU;
+		instr.imm = imm16;
+		break;
+
+	case 0x26:
+		instr.op = Op::LWR;
+		instr.imm = imm16;
+		break;
+
+	case 0x28:
+		instr.op = Op::SB;
+		instr.imm = imm16;
+		break;
+
+	case 0x29:
+		instr.op = Op::SH;
+		instr.imm = imm16;
+		break;
+
+	case 0x2a:
+		instr.op = Op::SWL;
+		instr.imm = imm16;
+		break;
+
+	case 0x2b:
+		instr.op = Op::SW;
+		instr.imm = imm16;
+		break;
+
+	case 0x2e:
+		instr.op = Op::SWR;
+		instr.imm = imm16;
+		break;
+	}
+
+	return instr;
+}
+
 class MIPS : public JITTIR::RegisterState, public JITTIR::RecompilerBackend, public JITTIR::BlockAnalysisBackend
 {
 public:
@@ -226,6 +479,7 @@ private:
 	Address exit_pc = 0;
 
 	StubCallPtr call(Address addr) noexcept;
+	MIPSInstruction load_instr(Address addr);
 };
 
 extern "C"
@@ -286,6 +540,18 @@ MIPS::MIPS()
 VirtualAddressSpace &MIPS::get_address_space()
 {
 	return addr_space;
+}
+
+MIPSInstruction MIPS::load_instr(Address addr)
+{
+	auto *ptr = static_cast<uint32_t *>(addr_space.get_page(addr / VirtualAddressSpace::PageSize));
+	if (!ptr)
+	{
+		MIPSInstruction instr{};
+		instr.op = Op::Invalid; // Should be a segfault meta-op.
+		return instr;
+	}
+	return decode_mips_instruction(ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 2]);
 }
 
 void MIPS::store32(Address addr, uint32_t value) noexcept
