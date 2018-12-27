@@ -1,3 +1,4 @@
+#include <setjmp.h>
 #include "ir_function.hpp"
 #include "ir_recompile.hpp"
 
@@ -118,7 +119,6 @@ static bool opcode_ends_block(Address addr)
 	{
 	case Op::BNZ:
 	case Op::BZ:
-	case Op::CallRegister:
 	case Op::BranchRegister:
 		return true;
 
@@ -127,368 +127,444 @@ static bool opcode_ends_block(Address addr)
 	}
 }
 
-struct RegisterTracker
-{
-	RegisterTracker(IRBuilder<> &builder_, Value *arg_)
-		: builder(builder_), arg(arg_)
-	{
-	}
-
-	void write(unsigned index, Value *value)
-	{
-		registers[index] = value;
-		dirty |= 1ull << index;
-	}
-
-	Value *read(unsigned index)
-	{
-		if (registers[index])
-			return registers[index];
-
-		auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, index);
-		registers[index] = builder.CreateLoad(ptr);
-		return registers[index];
-	}
-
-	void flush()
-	{
-		for (int i = 0; i < MaxRegisters; i++)
-		{
-			if (dirty & (1ull << i))
-			{
-				auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i);
-				builder.CreateStore(registers[i], ptr);
-			}
-		}
-		dirty = 0;
-	}
-
-	void invalidate()
-	{
-		memset(registers, 0, sizeof(registers));
-	}
-
-	IRBuilder<> &builder;
-	Value *arg;
-	Value *registers[MaxRegisters] = {};
-	uint64_t dirty = 0;
-};
+extern "C" {
+static void backend_call_addr(RegisterState *regs, Address addr, Address expected_addr);
+static void backend_jump_addr(RegisterState *regs, Address addr);
+static void backend_store32(RegisterState *regs, Address addr, uint32_t value);
+static void backend_store16(RegisterState *regs, Address addr, uint32_t value);
+static void backend_store8(RegisterState *regs, Address addr, uint32_t value);
+static uint32_t backend_load32(RegisterState *regs, Address addr);
+static uint16_t backend_load16(RegisterState *regs, Address addr);
+static uint8_t backend_load8(RegisterState *regs, Address addr);
+}
 
 struct Backend : RegisterState, BlockAnalysisBackend, RecompilerBackend
 {
-	void get_block_from_address(Address addr, Block &block) override
+	Backend();
+
+	union
 	{
-		block.block_start = addr;
-		bool ends_block;
+		uint32_t mem32[4096 / 4];
+		uint16_t mem16[4096 / 2];
+		uint8_t mem8[4096];
+	} mem;
 
-		do
+	void store32(Address addr, uint32_t value) noexcept
+	{
+		mem.mem32[addr >> 2] = value;
+	}
+
+	void store16(Address addr, uint32_t value) noexcept
+	{
+		mem.mem16[addr >> 1] = uint16_t(value);
+	}
+
+	void store8(Address addr, uint32_t value) noexcept
+	{
+		mem.mem8[addr] = uint8_t(value);
+	}
+
+	uint32_t load32(Address addr) const noexcept
+	{
+		return mem.mem32[addr >> 2];
+	}
+
+	uint16_t load16(Address addr) const noexcept
+	{
+		return mem.mem16[addr >> 1];
+	}
+
+	uint8_t load8(Address addr) const noexcept
+	{
+		return mem.mem8[addr];
+	}
+
+	enum { ExitTooDeepStack = 1, ExitTooDeepJumpStack = 2 };
+
+	Address enter(Address addr) noexcept
+	{
+		exit_pc = addr;
+
+		if (setjmp(jump_buffer))
+			return exit_pc;
+		call(addr);
+
+		// Should not be reached.
+		return exit_pc;
+	}
+
+	void call(Address addr) noexcept
+	{
+		auto itr = blocks.find(addr);
+		if (itr != end(blocks))
 		{
-			auto &instr = IDAT[addr >> 2];
-			ends_block = opcode_ends_block(addr);
+			itr->second.call(this);
+		}
+		else
+		{
+			JITTIR::Function func;
+			JITTIR::Recompiler recompiler;
+			func.set_backend(this);
+			recompiler.set_backend(this);
+			func.analyze_from_entry(addr);
+			auto result = recompiler.recompile_function(func);
+			if (!result.call)
+				std::abort();
+			blocks.emplace(addr, result);
+			result.call(this);
+		}
+	}
 
-			if (instr.op == Op::BZ)
+	void call_addr(Address addr, Address expected_addr) noexcept
+	{
+		if (return_stack_count >= 1024)
+		{
+			exit_pc = addr;
+			longjmp(jump_buffer, ExitTooDeepStack);
+		}
+
+		return_stack[return_stack_count++] = expected_addr;
+		stack_depth++;
+		call(addr);
+	}
+
+	void jump_addr(Address addr) noexcept
+	{
+		if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
+		{
+			stack_depth--;
+			return_stack[return_stack_count--];
+		}
+		else
+		{
+			stack_depth++;
+			if (stack_depth > 2048)
+				longjmp(jump_buffer, ExitTooDeepJumpStack);
+			call(addr);
+		}
+	}
+
+	void get_block_from_address(Address addr, Block &block) override;
+	void recompile_basic_block(
+		Address start_addr, Address end_addr,
+		Recompiler *recompiler, const Block &block, BasicBlock *bb, Value *args) override;
+
+	JITTIR::Jitter jitter;
+	std::unordered_map<Address, JITTIR::Recompiler::Result> blocks;
+	jmp_buf jump_buffer;
+	Address return_stack[1024];
+	unsigned return_stack_count = 0;
+	unsigned stack_depth = 0;
+	Address exit_pc = 0;
+};
+
+Backend::Backend()
+{
+	Jitter::init_global();
+	jitter.add_external_symbol("__recompiler_call_addr", backend_call_addr);
+	jitter.add_external_symbol("__recompiler_jump_indirect", backend_jump_addr);
+	jitter.add_external_symbol("__recompiler_store32", backend_store32);
+	jitter.add_external_symbol("__recompiler_store16", backend_store16);
+	jitter.add_external_symbol("__recompiler_store8", backend_store8);
+	jitter.add_external_symbol("__recompiler_load32", backend_load32);
+	jitter.add_external_symbol("__recompiler_load16", backend_load16);
+	jitter.add_external_symbol("__recompiler_load8", backend_load8);
+	memset(&mem, 0, sizeof(mem));
+}
+
+void Backend::get_block_from_address(Address addr, Block &block)
+{
+	block.block_start = addr;
+	bool ends_block;
+
+	do
+	{
+		auto &instr = IDAT[addr >> 2];
+		ends_block = opcode_ends_block(addr);
+
+		if (instr.op == Op::BZ)
+		{
+			if (instr.get_1op_imm_rc() == 0)
 			{
-				if (instr.get_1op_imm_rc() == 0)
-				{
-					block.terminator = Terminator::DirectBranch;
-					block.static_address_targets[0] =
-						addr + 4 + int16_t(instr.arg & 0xffff) * 4;
-				}
-				else
-				{
-					block.terminator = Terminator::SelectionBranch;
-					block.static_address_targets[0] =
-						addr + 4 + int16_t(instr.arg & 0xffff);
-					block.static_address_targets[1] =
-						addr + 4;
-				}
+				block.terminator = Terminator::DirectBranch;
+				block.static_address_targets[0] =
+					addr + 4 + int16_t(instr.arg & 0xffff) * 4;
 			}
-			else if (instr.op == Op::BNZ)
+			else
 			{
 				block.terminator = Terminator::SelectionBranch;
 				block.static_address_targets[0] =
-					addr + 4 + int16_t(instr.arg & 0xffff) * 4;
+					addr + 4 + int16_t(instr.arg & 0xffff);
 				block.static_address_targets[1] =
 					addr + 4;
 			}
-			else if (instr.op == Op::BranchRegister || instr.op == Op::CallRegister)
-				block.terminator = Terminator::Unwind;
-
-			// Conditional backwards branch into our current block. Split the block so we can get a clean loop.
-			if (ends_block &&
-			    block.terminator == Terminator::SelectionBranch &&
-			    block.static_address_targets[0] > block.block_start &&
-			    block.static_address_targets[0] < addr)
-			{
-				// Split the block.
-				block.block_end = block.static_address_targets[0];
-				block.terminator = Terminator::DirectBranch;
-				return;
-			}
-
-			addr += 4;
-		} while (!ends_block);
-
-		block.block_end = addr;
-	}
-
-	void recompile_basic_block(
-		Address start_addr, Address end_addr,
-		Recompiler *recompiler, const Block &block, BasicBlock *bb, Value *args) override
-	{
-		IRBuilder<> builder(bb);
-		auto &ctx = bb->getContext();
-		RegisterTracker tracker(builder, args);
-
-		for (Address addr = start_addr; addr < end_addr; addr += 4)
+		}
+		else if (instr.op == Op::BNZ)
 		{
-			auto &instr = IDAT[addr >> 2];
+			block.terminator = Terminator::SelectionBranch;
+			block.static_address_targets[0] =
+				addr + 4 + int16_t(instr.arg & 0xffff) * 4;
+			block.static_address_targets[1] =
+				addr + 4;
+		}
+		else if (instr.op == Op::BranchRegister || instr.op == Op::CallRegister)
+			block.terminator = Terminator::Unwind;
 
-			switch (instr.op)
-			{
-			case Op::Add:
-				tracker.write(instr.get_3op_rc(), builder.CreateAdd(
-					tracker.read(instr.get_3op_ra()),
-					tracker.read(instr.get_3op_rb())));
-				break;
-
-			case Op::Sub:
-				tracker.write(instr.get_3op_rc(), builder.CreateSub(
-					tracker.read(instr.get_3op_ra()),
-					tracker.read(instr.get_3op_rb())));
-				break;
-
-			case Op::Or:
-				tracker.write(instr.get_3op_rc(), builder.CreateOr(
-					tracker.read(instr.get_3op_ra()),
-					tracker.read(instr.get_3op_rb())));
-				break;
-
-			case Op::Xor:
-				tracker.write(instr.get_3op_rc(), builder.CreateXor(
-					tracker.read(instr.get_3op_ra()),
-					tracker.read(instr.get_3op_rb())));
-				break;
-
-			case Op::And:
-				tracker.write(instr.get_3op_rc(), builder.CreateAnd(
-					tracker.read(instr.get_3op_ra()),
-					tracker.read(instr.get_3op_rb())));
-				break;
-
-			case Op::Mul:
-				tracker.write(instr.get_3op_rc(), builder.CreateMul(
-					tracker.read(instr.get_3op_ra()),
-					tracker.read(instr.get_3op_rb())));
-				break;
-
-			case Op::ShiftLeft:
-				tracker.write(instr.get_3op_rc(), builder.CreateShl(
-					tracker.read(instr.get_3op_ra()),
-					builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
-				break;
-
-			case Op::ShiftRightLogical:
-				tracker.write(instr.get_3op_rc(), builder.CreateLShr(
-					tracker.read(instr.get_3op_ra()),
-					builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
-				break;
-
-			case Op::ShiftRightArithmetic:
-				tracker.write(instr.get_3op_rc(), builder.CreateAShr(
-					tracker.read(instr.get_3op_ra()),
-					builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
-				break;
-
-			case Op::CMPSLessThan:
-				tracker.write(instr.get_3op_rc(),
-					builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 1),
-					                     ConstantInt::get(Type::getInt32Ty(ctx), 0)));
-				break;
-
-			case Op::CMPULessThan:
-				tracker.write(instr.get_3op_rc(),
-				              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
-				                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-				                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
-				break;
-
-			case Op::AddImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateAdd(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
-				break;
-
-			case Op::OrImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateOr(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
-				break;
-
-			case Op::AndImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateAnd(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
-				break;
-
-			case Op::XorImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateXor(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
-				break;
-
-			case Op::ShiftLeftImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateShl(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
-				break;
-
-			case Op::ShiftRightLogicalImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateLShr(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
-				break;
-
-			case Op::ShiftRightArithmeticImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateAShr(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
-				break;
-
-			case Op::MulImm:
-				tracker.write(instr.get_2op_imm_rc(), builder.CreateMul(
-					tracker.read(instr.get_2op_imm_ra()),
-					ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
-				break;
-
-			case Op::CMPSLessThanImm:
-				tracker.write(instr.get_2op_imm_rc(),
-				              builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
-				                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-				                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
-				break;
-
-			case Op::CMPULessThanImm:
-				tracker.write(instr.get_2op_imm_rc(),
-				              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))),
-				                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
-				                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
-				break;
-
-			case Op::LoadImmediate:
-				tracker.write(instr.get_1op_imm_rc(), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
-				break;
-
-			case Op::LoadImmediateUpper:
-				tracker.write(instr.get_1op_imm_rc(), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff) << 16));
-				break;
-
-			case Op::BNZ:
-				tracker.flush();
-				BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
-				                   recompiler->get_block_for_address(addr + 4),
-				                   builder.CreateICmpNE(tracker.read(instr.get_1op_imm_rc()), ConstantInt::get(Type::getInt32Ty(ctx), 0)), bb);
-				break;
-
-			case Op::BZ:
-				tracker.flush();
-				BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
-				                   recompiler->get_block_for_address(addr + 4),
-				                   builder.CreateICmpEQ(tracker.read(instr.get_1op_imm_rc()), ConstantInt::get(Type::getInt32Ty(ctx), 0)), bb);
-				break;
-
-			case Op::Call:
-				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
-				tracker.flush();
-				recompiler->create_call(instr.arg, addr + 4);
-				tracker.invalidate();
-				break;
-
-			case Op::CallRegister:
-				tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
-				tracker.flush();
-				recompiler->create_call(tracker.read(instr.get_1op_rc()), addr + 4);
-				tracker.invalidate();
-				break;
-
-			case Op::BranchRegister:
-				tracker.flush();
-				recompiler->create_jump_indirect(tracker.read(instr.get_1op_rc()));
-				builder.CreateRetVoid();
-				break;
-			}
+		// Conditional backwards branch into our current block. Split the block so we can get a clean loop.
+		if (ends_block &&
+		    block.terminator == Terminator::SelectionBranch &&
+		    block.static_address_targets[0] > block.block_start &&
+		    block.static_address_targets[0] < addr)
+		{
+			// Split the block.
+			block.block_end = block.static_address_targets[0];
+			block.terminator = Terminator::DirectBranch;
+			return;
 		}
 
-		if (block.terminator == Terminator::DirectBranch)
-			BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
+		addr += 4;
+	} while (!ends_block);
+
+	block.block_end = addr;
+}
+
+void Backend::recompile_basic_block(
+	Address start_addr, Address end_addr,
+	Recompiler *recompiler, const Block &block, BasicBlock *bb, Value *args)
+{
+	IRBuilder<> builder(bb);
+	auto &ctx = bb->getContext();
+	RegisterTracker tracker(builder, args);
+
+	for (Address addr = start_addr; addr < end_addr; addr += 4)
+	{
+		auto &instr = IDAT[addr >> 2];
+
+		switch (instr.op)
+		{
+		case Op::Add:
+			tracker.write(instr.get_3op_rc(), builder.CreateAdd(
+				tracker.read(instr.get_3op_ra()),
+				tracker.read(instr.get_3op_rb())));
+			break;
+
+		case Op::Sub:
+			tracker.write(instr.get_3op_rc(), builder.CreateSub(
+				tracker.read(instr.get_3op_ra()),
+				tracker.read(instr.get_3op_rb())));
+			break;
+
+		case Op::Or:
+			tracker.write(instr.get_3op_rc(), builder.CreateOr(
+				tracker.read(instr.get_3op_ra()),
+				tracker.read(instr.get_3op_rb())));
+			break;
+
+		case Op::Xor:
+			tracker.write(instr.get_3op_rc(), builder.CreateXor(
+				tracker.read(instr.get_3op_ra()),
+				tracker.read(instr.get_3op_rb())));
+			break;
+
+		case Op::And:
+			tracker.write(instr.get_3op_rc(), builder.CreateAnd(
+				tracker.read(instr.get_3op_ra()),
+				tracker.read(instr.get_3op_rb())));
+			break;
+
+		case Op::Mul:
+			tracker.write(instr.get_3op_rc(), builder.CreateMul(
+				tracker.read(instr.get_3op_ra()),
+				tracker.read(instr.get_3op_rb())));
+			break;
+
+		case Op::ShiftLeft:
+			tracker.write(instr.get_3op_rc(), builder.CreateShl(
+				tracker.read(instr.get_3op_ra()),
+				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
+			break;
+
+		case Op::ShiftRightLogical:
+			tracker.write(instr.get_3op_rc(), builder.CreateLShr(
+				tracker.read(instr.get_3op_ra()),
+				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
+			break;
+
+		case Op::ShiftRightArithmetic:
+			tracker.write(instr.get_3op_rc(), builder.CreateAShr(
+				tracker.read(instr.get_3op_ra()),
+				builder.CreateAnd(tracker.read(instr.get_3op_rb()), ConstantInt::get(Type::getInt32Ty(ctx), 31))));
+			break;
+
+		case Op::CMPSLessThan:
+			tracker.write(instr.get_3op_rc(),
+			              builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			break;
+
+		case Op::CMPULessThan:
+			tracker.write(instr.get_3op_rc(),
+			              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_3op_ra()), tracker.read(instr.get_3op_rb())),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			break;
+
+		case Op::AddImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateAdd(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
+			break;
+
+		case Op::OrImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateOr(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
+			break;
+
+		case Op::AndImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateAnd(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
+			break;
+
+		case Op::XorImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateXor(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))));
+			break;
+
+		case Op::ShiftLeftImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateShl(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
+			break;
+
+		case Op::ShiftRightLogicalImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateLShr(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
+			break;
+
+		case Op::ShiftRightArithmeticImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateAShr(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), instr.arg & 31)));
+			break;
+
+		case Op::MulImm:
+			tracker.write(instr.get_2op_imm_rc(), builder.CreateMul(
+				tracker.read(instr.get_2op_imm_ra()),
+				ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))));
+			break;
+
+		case Op::CMPSLessThanImm:
+			tracker.write(instr.get_2op_imm_rc(),
+			              builder.CreateSelect(builder.CreateICmpSLT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.arg & 0xffff))),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			break;
+
+		case Op::CMPULessThanImm:
+			tracker.write(instr.get_2op_imm_rc(),
+			              builder.CreateSelect(builder.CreateICmpULT(tracker.read(instr.get_2op_imm_ra()), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff))),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 1),
+			                                   ConstantInt::get(Type::getInt32Ty(ctx), 0)));
+			break;
+
+		case Op::LoadImmediate:
+			tracker.write(instr.get_1op_imm_rc(), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff)));
+			break;
+
+		case Op::LoadImmediateUpper:
+			tracker.write(instr.get_1op_imm_rc(), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.arg & 0xffff) << 16));
+			break;
+
+		case Op::BNZ:
+			tracker.flush();
+			BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
+			                   recompiler->get_block_for_address(addr + 4),
+			                   builder.CreateICmpNE(tracker.read(instr.get_1op_imm_rc()), ConstantInt::get(Type::getInt32Ty(ctx), 0)), bb);
+			break;
+
+		case Op::BZ:
+			tracker.flush();
+			BranchInst::Create(recompiler->get_block_for_address(addr + 4 + int16_t(instr.arg & 0xffff) * 4),
+			                   recompiler->get_block_for_address(addr + 4),
+			                   builder.CreateICmpEQ(tracker.read(instr.get_1op_imm_rc()), ConstantInt::get(Type::getInt32Ty(ctx), 0)), bb);
+			break;
+
+		case Op::Call:
+			tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
+			tracker.flush();
+			recompiler->create_call(instr.arg, addr + 4);
+			tracker.invalidate();
+			break;
+
+		case Op::CallRegister:
+			tracker.write(63, ConstantInt::get(Type::getInt32Ty(ctx), addr + 4));
+			tracker.flush();
+			recompiler->create_call(tracker.read(instr.get_1op_rc()), addr + 4);
+			tracker.invalidate();
+			break;
+
+		case Op::BranchRegister:
+			tracker.flush();
+			recompiler->create_jump_indirect(tracker.read(instr.get_1op_rc()));
+			builder.CreateRetVoid();
+			break;
+		}
 	}
-};
 
-static void call_addr(RegisterState *regs, Address addr, Address expected_addr)
-{
-
+	if (block.terminator == Terminator::DirectBranch)
+		BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
 }
 
-static void jump_addr(RegisterState *regs, Address addr)
+extern "C" {
+static void backend_call_addr(RegisterState *regs, Address addr, Address expected_addr)
 {
-
+	static_cast<Backend *>(regs)->call_addr(addr, expected_addr);
 }
 
-static void store32(RegisterState *regs, Address addr, uint32_t value)
+static void backend_jump_addr(RegisterState *regs, Address addr)
 {
-
+	static_cast<Backend *>(regs)->jump_addr(addr);
 }
 
-static void store16(RegisterState *regs, Address addr, uint32_t value)
+static void backend_store32(RegisterState *regs, Address addr, uint32_t value)
 {
-
+	static_cast<Backend *>(regs)->store32(addr, value);
 }
 
-static void store8(RegisterState *regs, Address addr, uint32_t value)
+static void backend_store16(RegisterState *regs, Address addr, uint32_t value)
 {
-
+	static_cast<Backend *>(regs)->store16(addr, value);
 }
 
-static uint32_t load32(RegisterState *regs, Address addr)
+static void backend_store8(RegisterState *regs, Address addr, uint32_t value)
 {
-
+	static_cast<Backend *>(regs)->store8(addr, value);
 }
 
-static uint16_t load16(RegisterState *regs, Address addr)
+static uint32_t backend_load32(RegisterState *regs, Address addr)
 {
-
+	return static_cast<Backend *>(regs)->load32(addr);
 }
 
-static uint8_t load8(RegisterState *regs, Address addr)
+static uint16_t backend_load16(RegisterState *regs, Address addr)
 {
+	return static_cast<Backend *>(regs)->load16(addr);
+}
 
+static uint8_t backend_load8(RegisterState *regs, Address addr)
+{
+	return static_cast<Backend *>(regs)->load8(addr);
+}
 }
 
 int main()
 {
-	Jitter::init_global();
-	JITTIR::Function func;
-	JITTIR::Recompiler recompiler;
-	JITTIR::Jitter jitter;
 	Backend back;
-	func.set_backend(&back);
-	recompiler.set_backend(&back);
-	recompiler.set_jitter(&jitter);
-
-	jitter.add_external_symbol("__recompiler_call_addr", call_addr);
-	jitter.add_external_symbol("__recompiler_jump_indirect", jump_addr);
-	jitter.add_external_symbol("__recompiler_store32", store32);
-	jitter.add_external_symbol("__recompiler_store16", store16);
-	jitter.add_external_symbol("__recompiler_store8", store8);
-	jitter.add_external_symbol("__recompiler_load32", load32);
-	jitter.add_external_symbol("__recompiler_load16", load16);
-	jitter.add_external_symbol("__recompiler_load8", load8);
-
-	func.analyze_from_entry(0);
-	auto result = recompiler.recompile_function(func);
-
 	back.scalar_registers[3] = 100;
-	result.call(&back);
-	result.call(&back);
+	back.enter(0);
 }

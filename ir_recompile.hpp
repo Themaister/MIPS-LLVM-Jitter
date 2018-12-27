@@ -24,6 +24,53 @@ public:
 		llvm::Value *arg) = 0;
 };
 
+struct RegisterTracker
+{
+	RegisterTracker(llvm::IRBuilder<> &builder_, llvm::Value *arg_)
+		: builder(builder_), arg(arg_)
+	{
+	}
+
+	void write(unsigned index, llvm::Value *value)
+	{
+		registers[index] = value;
+		dirty |= 1ull << index;
+	}
+
+	llvm::Value *read(unsigned index)
+	{
+		if (registers[index])
+			return registers[index];
+
+		auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, index);
+		registers[index] = builder.CreateLoad(ptr);
+		return registers[index];
+	}
+
+	void flush()
+	{
+		for (int i = 0; i < MaxRegisters; i++)
+		{
+			if (dirty & (1ull << i))
+			{
+				auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i);
+				builder.CreateStore(registers[i], ptr);
+			}
+		}
+		dirty = 0;
+	}
+
+	void invalidate()
+	{
+		memset(registers, 0, sizeof(registers));
+	}
+
+	llvm::IRBuilder<> &builder;
+	llvm::Value *arg;
+	llvm::Value *registers[MaxRegisters] = {};
+	uint64_t dirty = 0;
+};
+
 struct RegisterState
 {
 	int32_t scalar_registers[MaxRegisters] = {};
