@@ -1,0 +1,34 @@
+CC := mipsel-linux-gnu-gcc
+LD := mipsel-linux-gnu-ld
+AS := mipsel-linux-gnu-as
+OBJCOPY := mipsel-linux-gnu-objcopy
+CFLAGS = -std=gnu99 -nostdlib -mno-abicalls -mabi=eabi -march=r4k -mgp32
+ASFLAGS := -mabi=eabi -march=r4k -mgp32
+CFLAGS += -O2
+
+CRT_OBJECTS := start.o
+C_FILES := $(wildcard *.c)
+C_OBJECTS := $(C_FILES:.c=.o)
+
+all: test.text test.data
+
+test.text: test
+	$(OBJCOPY) -j .text $< $@ -O binary
+
+test.data: test
+	$(OBJCOPY) -j .data $< $@ -O binary
+
+test: $(CRT_OBJECTS) $(C_OBJECTS)
+	$(LD) -o $@ $(CRT_OBJECTS) $(C_OBJECTS) -T link.T
+
+%.o: %.s
+	$(AS) -o $@ $< $(ASFLAGS)
+
+%.o: %.c
+	$(CC) -c -o $@ $< $(CFLAGS)
+
+clean:
+	rm -f test test.text test.data $(CRT_OBJECTS) $(C_OBJECTS)
+
+.PHONY: all clean
+
