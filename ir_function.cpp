@@ -77,14 +77,11 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 		break;
 	}
 
-	case Terminator::Unwind:
-	case Terminator::IndirectBranch:
-	{
+	case Terminator::Exit:
 		// This will end any function. For indirect branches, we will return after all call if the leaf target returns.
 		// For unwind we directly call longjmp and end our frame.
 		leaf_blocks.push_back(meta);
 		break;
-	}
 
 	default:
 		break;

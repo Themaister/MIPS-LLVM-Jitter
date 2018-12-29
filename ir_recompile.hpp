@@ -5,9 +5,9 @@
 
 namespace JITTIR
 {
-struct RegisterInstances
+enum
 {
-	std::vector<llvm::Value *> instances;
+	MaxRegisters = 34
 };
 
 class Recompiler;
@@ -22,58 +22,6 @@ public:
 		const Block &block,
 		llvm::BasicBlock *basic_block,
 		llvm::Value *arg) = 0;
-};
-
-struct RegisterTracker
-{
-	RegisterTracker(llvm::IRBuilder<> &builder_, llvm::Value *arg_)
-		: builder(builder_), arg(arg_)
-	{
-	}
-
-	void write(unsigned index, llvm::Value *value)
-	{
-		registers[index] = value;
-		dirty |= 1ull << index;
-	}
-
-	llvm::Value *read(unsigned index)
-	{
-		if (registers[index])
-			return registers[index];
-
-		auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, index, std::string("Reg") + std::to_string(index) + "Ptr");
-		registers[index] = builder.CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
-		return registers[index];
-	}
-
-	void flush()
-	{
-		for (int i = 0; i < MaxRegisters; i++)
-		{
-			if (dirty & (1ull << i))
-			{
-				auto *ptr = builder.CreateConstInBoundsGEP1_64(arg, i, std::string("Reg") + std::to_string(i) + "Ptr");
-				builder.CreateStore(registers[i], ptr);
-			}
-		}
-		dirty = 0;
-	}
-
-	void invalidate()
-	{
-		memset(registers, 0, sizeof(registers));
-	}
-
-	std::string get_twine(unsigned index)
-	{
-		return std::string("Reg") + std::to_string(index) + "_";
-	}
-
-	llvm::IRBuilder<> &builder;
-	llvm::Value *arg;
-	llvm::Value *registers[MaxRegisters] = {};
-	uint64_t dirty = 0;
 };
 
 struct RegisterState
@@ -96,37 +44,13 @@ public:
 	Result recompile_function(const Function &function);
 	llvm::BasicBlock *get_block_for_address(Address addr);
 	llvm::Function *get_current_function();
-
-	llvm::Value *create_call(Address addr, Address expected_return);
-	llvm::Value *create_call(llvm::Value *addr, Address expected_return);
-	llvm::Value *create_jump_indirect(llvm::Value *addr);
-	void create_store32(llvm::Value *addr, llvm::Value *value);
-	void create_store16(llvm::Value *addr, llvm::Value *value);
-	void create_store8(llvm::Value *addr, llvm::Value *value);
-	llvm::Value *create_load32(llvm::Value *addr);
-	llvm::Value *create_load16(llvm::Value *addr);
-	llvm::Value *create_load8(llvm::Value *addr);
-
-	// Helpers which build various LLVM instructions.
+	llvm::Module *get_current_module();
 
 private:
 	RecompilerBackend *backend = nullptr;
 	Jitter *jitter = nullptr;
 	std::unordered_map<Address, llvm::BasicBlock *> address_to_basic_block;
 
-	struct
-	{
-		llvm::Function *store32 = nullptr;
-		llvm::Function *store16 = nullptr;
-		llvm::Function *store8 = nullptr;
-		llvm::Function *load32 = nullptr;
-		llvm::Function *load16 = nullptr;
-		llvm::Function *load8 = nullptr;
-		llvm::Function *call = nullptr;
-		llvm::Function *jump_indirect = nullptr;
-	} calls;
-	llvm::Value *argument = nullptr;
-	llvm::BasicBlock *bb = nullptr;
 	llvm::Module *module = nullptr;
 	llvm::Function *function = nullptr;
 };

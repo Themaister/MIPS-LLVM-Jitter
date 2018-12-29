@@ -7,17 +7,12 @@
 namespace JITTIR
 {
 using Address = uint32_t;
-enum
-{
-	MaxRegisters = 64
-};
 
 enum class Terminator
 {
 	DirectBranch, // Direct jump to static address.
 	SelectionBranch, // Branches to one of two possible addresses.
-	IndirectBranch, // Branches to register. Return also goes here since it might return to unpredictable location.
-	Unwind // Should immediately flush registers and unwind its stack to top frame (SJLJ-style).
+	Exit // Ends function.
 };
 
 struct Block
