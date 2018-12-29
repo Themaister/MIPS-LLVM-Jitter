@@ -15,6 +15,50 @@
 using namespace JITTIR;
 using namespace llvm;
 
+enum Syscalls
+{
+	SYSCALL_EXIT = 0,
+	SYSCALL_WRITE,
+	SYSCALL_READ,
+	SYSCALL_COUNT
+};
+
+enum Registers
+{
+	REG_ZERO = 0,
+	REG_AT,
+	REG_V0,
+	REG_V1,
+	REG_A0,
+	REG_A1,
+	REG_A2,
+	REG_A3,
+	REG_T0,
+	REG_T1,
+	REG_T2,
+	REG_T3,
+	REG_T4,
+	REG_T5,
+	REG_T6,
+	REG_T7,
+	REG_S0,
+	REG_S1,
+	REG_S2,
+	REG_S3,
+	REG_S4,
+	REG_S5,
+	REG_S6,
+	REG_S7,
+	REG_T8,
+	REG_T9,
+	REG_K0,
+	REG_K1,
+	REG_GP,
+	REG_SP,
+	REG_FP,
+	REG_RA,
+};
+
 struct RegisterTracker
 {
 	RegisterTracker(Value *arg_)
@@ -717,6 +761,12 @@ private:
 	} calls;
 
 	Value *argument = nullptr;
+
+	using SyscallPtr = void (MIPS::*)();
+	SyscallPtr syscall_table[SYSCALL_COUNT] = {};
+	void syscall_exit();
+	void syscall_write();
+	void syscall_read();
 };
 
 extern "C"
@@ -790,6 +840,10 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_sigill", backend_sigill);
 	jitter.add_external_symbol("__recompiler_break", backend_break);
 	jitter.add_external_symbol("__recompiler_syscall", backend_syscall);
+
+	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
+	syscall_table[SYSCALL_WRITE] = &MIPS::syscall_write;
+	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
 }
 
 VirtualAddressSpace &MIPS::get_address_space()
@@ -859,7 +913,42 @@ void MIPS::op_break(Address addr) noexcept
 void MIPS::op_syscall(Address addr) noexcept
 {
 	// Syscall
-	(void)addr;
+	unsigned syscall = scalar_registers[REG_V0];
+	if (syscall < SYSCALL_COUNT && syscall_table[syscall])
+		(this->*syscall_table[syscall])();
+	else
+		scalar_registers[REG_V0] = -1;
+}
+
+void MIPS::syscall_exit()
+{
+	exit(scalar_registers[REG_A0]);
+}
+
+void MIPS::syscall_write()
+{
+	int fd = scalar_registers[REG_A0];
+	Address addr = scalar_registers[REG_A1];
+	uint32_t count = scalar_registers[REG_A2];
+	std::vector<uint8_t> output;
+	output.reserve(count);
+
+	for (uint32_t i = 0; i < count; i++)
+		output.push_back(load8(addr + i));
+
+	scalar_registers[REG_A0] = write(fd, output.data(), count);
+}
+
+void MIPS::syscall_read()
+{
+	int fd = scalar_registers[REG_A0];
+	Address addr = scalar_registers[REG_A1];
+	uint32_t count = scalar_registers[REG_A2];
+	std::vector<uint8_t> output(count);
+	ssize_t ret = ::read(fd, output.data(), count);
+	for (ssize_t i = 0; i < ret; i++)
+		store8(addr + i, output[i]);
+	scalar_registers[REG_A0] = ret;
 }
 
 Address MIPS::enter(Address addr) noexcept
@@ -986,7 +1075,7 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 		if (end_of_basic_block)
 		{
 			// Check if we can execute the delay slot.
-			if (mips_opcode_is_branch(load_instr(addr + 4).op))
+			if (instruction.op == Op::BREAK || mips_opcode_is_branch(load_instr(addr + 4).op))
 				block.block_end = addr + 4;
 			else
 				block.block_end = addr + 8;
@@ -1404,7 +1493,17 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SYSCALL:
 	{
+		tracker.flush();
 		create_syscall(recompiler, bb, addr);
+		tracker.invalidate();
+		break;
+	}
+
+	case Op::BREAK:
+	{
+		tracker.flush();
+		create_break(recompiler, bb, addr);
+		break;
 	}
 
 	default:
