@@ -14,3 +14,4 @@ typedef int ssize_t;
 void exit(int code);
 ssize_t write(int fd, const void *data, size_t size);
 ssize_t read(int fd, void *data, size_t size);
+
