@@ -393,7 +393,7 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 	uint8_t rd = (word >> 11) & 31;
 	uint8_t shamt = (word >> 6) & 31;
 	uint16_t imm16 = word & 0xffff;
-	uint16_t imm26 = word & ((1u << 26) - 1u);
+	uint32_t imm26 = word & ((1u << 26) - 1u);
 	uint8_t low_op = word & ((1u << 6) - 1u);
 
 	instr.rs = rs;
@@ -967,6 +967,7 @@ Address MIPS::enter(Address addr) noexcept
 
 StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 {
+	fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
 	{
 		exit_pc = addr;
@@ -980,14 +981,17 @@ StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 
 StubCallPtr MIPS::jump_addr(Address addr) noexcept
 {
+	fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
 	if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
 	{
+		fprintf(stderr, "  Successfully predicted return.\n");
 		stack_depth--;
-		return_stack[return_stack_count--];
+		return_stack_count--;
 		return nullptr;
 	}
 	else
 	{
+		fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
 		stack_depth++;
 		if (stack_depth > 2048)
 		{
@@ -1056,6 +1060,7 @@ static bool mips_opcode_ends_basic_block(Op op)
 	case Op::BLEZ:
 	case Op::BGTZ:
 	case Op::BREAK:
+	case Op::Invalid:
 		return true;
 
 	default:
@@ -1074,11 +1079,7 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 
 		if (end_of_basic_block)
 		{
-			// Check if we can execute the delay slot.
-			if (instruction.op == Op::BREAK || mips_opcode_is_branch(load_instr(addr + 4).op))
-				block.block_end = addr + 4;
-			else
-				block.block_end = addr + 8;
+			block.block_end = addr + 4;
 
 			switch (instruction.op)
 			{
@@ -1089,6 +1090,7 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 
 			case Op::JR:
 			case Op::BREAK:
+			case Op::Invalid:
 				block.terminator = Terminator::Exit;
 				break;
 
@@ -1098,7 +1100,7 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 			case Op::BNE:
 				block.terminator = Terminator::SelectionBranch;
 				block.static_address_targets[0] = (addr + 4) + int16_t(instruction.imm) * 4;
-				block.static_address_targets[1] = block.block_end;
+				block.static_address_targets[1] = addr + 8;
 				break;
 
 			default:
@@ -1322,6 +1324,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 
+		tracker.set_builder(&builder);
 		tracker.flush();
 
 		auto *call = create_jump_indirect(recompiler, bb, target);
@@ -1506,7 +1509,91 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 	}
 
+	case Op::LB:
+	{
+		auto *loaded = create_load8(recompiler, bb,
+		                            builder.CreateAdd(tracker.read(instr.rs),
+		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LBAddr"));
+		builder.SetInsertPoint(bb);
+		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
+		tracker.write(instr.rt, loaded);
+		break;
+	}
+
+	case Op::LH:
+	{
+		auto *loaded = create_load16(recompiler, bb,
+		                             builder.CreateAdd(tracker.read(instr.rs),
+		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LHAddr"));
+		builder.SetInsertPoint(bb);
+		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
+		tracker.write(instr.rt, loaded);
+		break;
+	}
+
+	case Op::LBU:
+	{
+		auto *loaded = create_load8(recompiler, bb,
+		                            builder.CreateAdd(tracker.read(instr.rs),
+		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LBAddr"));
+		builder.SetInsertPoint(bb);
+		loaded = builder.CreateZExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
+		tracker.write(instr.rt, loaded);
+		break;
+	}
+
+	case Op::LHU:
+	{
+		auto *loaded = create_load16(recompiler, bb,
+		                             builder.CreateAdd(tracker.read(instr.rs),
+		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LHAddr"));
+		builder.SetInsertPoint(bb);
+		loaded = builder.CreateZExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
+		tracker.write(instr.rt, loaded);
+		break;
+	}
+
+	case Op::LW:
+	{
+		auto *loaded = create_load32(recompiler, bb,
+		                             builder.CreateAdd(tracker.read(instr.rs),
+		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWAddr"));
+		builder.SetInsertPoint(bb);
+		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
+		tracker.write(instr.rt, loaded);
+		break;
+	}
+
+	case Op::SB:
+	{
+		create_store8(recompiler, bb,
+		              builder.CreateAdd(tracker.read(instr.rs),
+		                                ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SBAddr"),
+		              tracker.read(instr.rt));
+		break;
+	}
+
+	case Op::SH:
+	{
+		create_store16(recompiler, bb,
+		               builder.CreateAdd(tracker.read(instr.rs),
+		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SHAddr"),
+		               tracker.read(instr.rt));
+		break;
+	}
+
+	case Op::SW:
+	{
+		create_store32(recompiler, bb,
+		               builder.CreateAdd(tracker.read(instr.rs),
+		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
+		               tracker.read(instr.rt));
+		break;
+	}
+
 	default:
+		tracker.flush();
+		create_sigill(recompiler, bb, addr);
 		break;
 	}
 }
@@ -1526,7 +1613,9 @@ void MIPS::recompile_basic_block(
 	}
 
 	if (block.terminator == Terminator::DirectBranch)
+	{
 		BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
+	}
 }
 
 Value *MIPS::create_call(Recompiler *recompiler, BasicBlock *bb, Address addr, Address expected_return)
@@ -1737,12 +1826,11 @@ void MIPS::create_syscall(Recompiler *recompiler, BasicBlock *bb, Address addr)
 
 int main(int argc, char **argv)
 {
-	VirtualAddressSpace addr_space;
+	MIPS mips;
 	Elf32_Ehdr ehdr;
-	if (!load_elf(argv[1], ehdr, addr_space))
+	if (!load_elf(argv[1], ehdr, mips.get_address_space()))
 		return 1;
 
-	MIPS mips;
 	mips.enter(ehdr.e_entry);
 	return 0;
 }
