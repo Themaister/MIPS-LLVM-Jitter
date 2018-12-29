@@ -954,6 +954,7 @@ void MIPS::syscall_read()
 Address MIPS::enter(Address addr) noexcept
 {
 	exit_pc = addr;
+	return_stack_count = 0;
 
 	if (setjmp(jump_buffer))
 		return exit_pc;
