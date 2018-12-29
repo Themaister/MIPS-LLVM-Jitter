@@ -1902,6 +1902,32 @@ void MIPS::create_syscall(Recompiler *recompiler, BasicBlock *bb, Address addr)
 	builder.CreateCall(calls.op_syscall, values);
 }
 
+template <typename Call>
+static void call_int(MIPS &mips, const std::unordered_map<std::string, Address> &symbol_table, const char *sym, int32_t a, int32_t b, const Call &call)
+{
+	mips.scalar_registers[REG_A0] = a;
+	mips.scalar_registers[REG_A1] = b;
+	auto test = symbol_table.find(sym)->second;
+	mips.enter(test);
+	call(mips.scalar_registers[REG_V0], mips.scalar_registers[REG_V1]);
+}
+
+static void assert_equal(int64_t v0, int64_t v1)
+{
+	if (v0 != v1)
+		std::abort();
+}
+
+static int64_t create_int64(int32_t v0, int32_t v1)
+{
+	return (int64_t(v1) << 32) | uint32_t(v0);
+}
+
+static uint64_t create_uint64(int32_t v0, int32_t v1)
+{
+	return (uint64_t(v1) << 32) | uint32_t(v0);
+}
+
 int main(int argc, char **argv)
 {
 	MIPS mips;
@@ -1910,6 +1936,17 @@ int main(int argc, char **argv)
 	if (!load_elf(argv[1], ehdr, mips.get_address_space(), symbol_table))
 		return 1;
 
-	mips.enter(ehdr.e_entry);
+	call_int(mips, symbol_table, "test_add", 50, 150, [](int32_t v0, int32_t v1) { assert_equal(v0, 200); });
+
+	call_int(mips, symbol_table, "test_mult", -2, 4, [](int32_t v0, int32_t v1) { assert_equal(create_int64(v0, v1), -8); });
+	call_int(mips, symbol_table, "test_mult", -2, -4, [](int32_t v0, int32_t v1) { assert_equal(create_int64(v0, v1), 8); });
+	call_int(mips, symbol_table, "test_mult", -100000000, -200000000, [](int32_t v0, int32_t v1) { assert_equal(create_int64(v0, v1), int64_t(-100000000) * int64_t(-200000000)); });
+
+	call_int(mips, symbol_table, "test_multu", 2, 4, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), 8); });
+	call_int(mips, symbol_table, "test_multu", 0xff000000u, 0xfff00000u, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), uint64_t(0xff000000u) * uint64_t(0xfff00000u)); });
+
+	call_int(mips, symbol_table, "test_div", 2, 4, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), 8); });
+	call_int(mips, symbol_table, "test_div", 0xff000000u, 0xfff00000u, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), uint64_t(0xff000000u) * uint64_t(0xfff00000u)); });
+
 	return 0;
 }

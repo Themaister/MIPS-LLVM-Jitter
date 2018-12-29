@@ -2,18 +2,19 @@ CC := mipsel-linux-gnu-gcc
 LD := mipsel-linux-gnu-ld
 AS := mipsel-linux-gnu-as
 OBJCOPY := mipsel-linux-gnu-objcopy
-CFLAGS = -std=gnu99 -nostdlib -mno-abicalls -mabi=eabi -march=r4k -mgp32
-ASFLAGS := -mabi=eabi -march=r4k -mgp32
+CFLAGS = -std=gnu99 -nostdlib -mno-abicalls -mabi=eabi -march=vr4300 -mgp32
+ASFLAGS := -mabi=eabi -march=vr4300 -mgp32
 CFLAGS += -O2
 
-CRT_OBJECTS := start.o
+AS_FILES := $(wildcard *.s)
+AS_OBJECTS := $(AS_FILES:.s=.o)
 C_FILES := $(wildcard *.c)
 C_OBJECTS := $(C_FILES:.c=.o)
 
 all: test
 
-test: $(CRT_OBJECTS) $(C_OBJECTS)
-	$(LD) -o $@ $(CRT_OBJECTS) $(C_OBJECTS)
+test: $(AS_OBJECTS) $(C_OBJECTS)
+	$(LD) -o $@ $(AS_OBJECTS) $(C_OBJECTS)
 
 %.o: %.s
 	$(AS) -o $@ $< $(ASFLAGS)
@@ -22,7 +23,7 @@ test: $(CRT_OBJECTS) $(C_OBJECTS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 clean:
-	rm -f test $(CRT_OBJECTS) $(C_OBJECTS)
+	rm -f test $(AS_OBJECTS) $(C_OBJECTS)
 
 .PHONY: all clean
 
