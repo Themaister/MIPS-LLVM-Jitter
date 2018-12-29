@@ -5,11 +5,6 @@
 
 namespace JITTIR
 {
-enum
-{
-	MaxRegisters = 34
-};
-
 class Recompiler;
 
 class RecompilerBackend
@@ -26,7 +21,9 @@ public:
 
 struct RegisterState
 {
-	int32_t scalar_registers[MaxRegisters] = {};
+	enum { MaxIntegerRegisters = 64, MaxFloatRegisters = 64 };
+	int32_t scalar_registers[MaxIntegerRegisters] = {};
+	float float_registers[MaxFloatRegisters] = {};
 };
 
 class Recompiler

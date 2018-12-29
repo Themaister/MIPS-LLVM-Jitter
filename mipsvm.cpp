@@ -57,6 +57,10 @@ enum Registers
 	REG_SP,
 	REG_FP,
 	REG_RA,
+
+	REG_LO,
+	REG_HI,
+	REG_COUNT
 };
 
 struct RegisterTracker
@@ -76,44 +80,65 @@ struct RegisterTracker
 		return arg;
 	}
 
-	void write(unsigned index, llvm::Value *value)
+	void write_int(unsigned index, Value *value)
 	{
 		if (index != 0)
 		{
-			registers[index] = value;
-			dirty |= 1ull << index;
+			int_registers[index] = value;
+			dirty_int |= 1ull << index;
 		}
 	}
 
-	Value *read(unsigned index)
+	Value *read_int(unsigned index)
 	{
 		if (index == 0)
 			return ConstantInt::get(Type::getInt32Ty(builder->getContext()), 0);
 
-		if (registers[index])
-			return registers[index];
+		if (int_registers[index])
+			return int_registers[index];
 
 		auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index, std::string("Reg") + std::to_string(index) + "Ptr");
-		registers[index] = builder->CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
-		return registers[index];
+		int_registers[index] = builder->CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
+		return int_registers[index];
+	}
+
+	void write_float(unsigned index, Value *value)
+	{
+		if (index != 0)
+		{
+			float_registers[index] = value;
+			dirty_float |= 1u << index;
+		}
+	}
+
+	Value *read_float(unsigned index)
+	{
+		if (float_registers[index])
+			return float_registers[index];
+
+		auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index, std::string("Reg") + std::to_string(index) + "Ptr");
+		float_registers[index] = builder->CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
+		return float_registers[index];
 	}
 
 	void flush()
 	{
-		for (int i = 0; i < MaxRegisters; i++)
+		for (int i = 0; i < REG_COUNT; i++)
 		{
-			if (dirty & (1ull << i))
+			if (dirty_int & (1ull << i))
 			{
 				auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, i, std::string("Reg") + std::to_string(i) + "Ptr");
-				builder->CreateStore(registers[i], ptr);
+				builder->CreateStore(int_registers[i], ptr);
 			}
 		}
-		dirty = 0;
+		dirty_int = 0;
+		dirty_float = 0;
 	}
 
 	void invalidate()
 	{
-		memset(registers, 0, sizeof(registers));
+		memset(int_registers, 0, sizeof(int_registers));
+		memset(float_registers, 0, sizeof(float_registers));
 	}
 
 	std::string get_twine(unsigned index)
@@ -123,8 +148,10 @@ struct RegisterTracker
 
 	IRBuilder<> *builder = nullptr;
 	Value *arg;
-	Value *registers[MaxRegisters] = {};
-	uint64_t dirty = 0;
+	Value *int_registers[REG_COUNT] = {};
+	Value *float_registers[32] = {};
+	uint64_t dirty_int = 0;
+	uint32_t dirty_float = 0;
 };
 
 class VirtualAddressSpace
@@ -172,7 +199,8 @@ private:
 	std::function<void ()> func;
 };
 
-static bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space)
+static bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space,
+                     std::unordered_map<std::string, Address> &symbol_table)
 {
 	// Load a very simple MIPS32 little-endian ELF file.
 	int fd = open(path, O_RDONLY);
@@ -282,6 +310,44 @@ static bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSp
 				for (uint32_t addr = begin_memory_segment; addr < end_memory_segment; addr += VirtualAddressSpace::PageSize)
 					addr_space.set_page(addr / VirtualAddressSpace::PageSize, page + (addr - begin_memory_segment));
 			}
+		}
+	}
+
+	uint32_t sh_table = ehdr->e_shoff;
+	uint32_t sh_size = ehdr->e_shentsize;
+	uint32_t sh_num = ehdr->e_shnum;
+
+	// Read the symbols.
+	for (uint32_t i = 0; i < sh_num; i++)
+	{
+		auto *shdr = reinterpret_cast<const Elf32_Shdr *>(mapped + sh_table + i * sh_size);
+		if (shdr->sh_type != SHT_SYMTAB)
+			continue;
+
+		unsigned entries = shdr->sh_size / shdr->sh_entsize;
+		uint32_t base_addr = shdr->sh_offset;
+
+		for (unsigned e = 0; e < entries; e++)
+		{
+			uint32_t string_section = shdr->sh_link;
+			const char *strings = nullptr;
+			if (string_section != SHN_UNDEF)
+			{
+				strings =
+					reinterpret_cast<const char *>(
+						mapped + reinterpret_cast<const Elf32_Shdr *>(mapped + sh_table + string_section * sh_size)->sh_offset);
+			}
+
+			const auto *sym = reinterpret_cast<const Elf32_Sym *>(mapped + base_addr + e * shdr->sh_entsize);
+			int binding = ELF32_ST_BIND(sym->st_info);
+			if (binding != STB_GLOBAL)
+				continue;
+
+			if (sym->st_name == SHN_UNDEF)
+				continue;
+
+			const char *name = strings + sym->st_name;
+			symbol_table.emplace(name, sym->st_value);
 		}
 	}
 
@@ -707,7 +773,7 @@ public:
 	StubCallPtr call_addr(Address addr, Address expected_addr) noexcept;
 	StubCallPtr jump_addr(Address addr) noexcept;
 
-	enum { ExitTooDeepStack = 1, ExitTooDeepJumpStack = 2, ExitBreak = 3 };
+	enum { ExitTooDeepStack = 1, ExitTooDeepJumpStack = 2, ExitBreak = 3, JumpToZero = 4 };
 
 private:
 	VirtualAddressSpace addr_space;
@@ -955,6 +1021,7 @@ Address MIPS::enter(Address addr) noexcept
 {
 	exit_pc = addr;
 	return_stack_count = 0;
+	stack_depth = 0;
 
 	if (setjmp(jump_buffer))
 		return exit_pc;
@@ -989,6 +1056,11 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 		stack_depth--;
 		return_stack_count--;
 		return nullptr;
+	}
+	else if (addr == 0)
+	{
+		exit_pc = addr;
+		longjmp(jump_buffer, JumpToZero);
 	}
 	else
 	{
@@ -1080,7 +1152,10 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 
 		if (end_of_basic_block)
 		{
-			block.block_end = addr + 4;
+			if (!mips_opcode_is_branch(instruction.op) || mips_opcode_is_branch(load_instr(addr + 4).op))
+				block.block_end = addr + 4;
+			else
+				block.block_end = addr + 8;
 
 			switch (instruction.op)
 			{
@@ -1125,177 +1200,177 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	// Arithmetic operations.
 	case Op::ADD:
 	case Op::ADDU:
-		tracker.write(instr.rd, builder.CreateAdd(tracker.read(instr.rs), tracker.read(instr.rt),
-		              tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateAdd(tracker.read_int(instr.rs), tracker.read_int(instr.rt),
+		                                              tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SUB:
 	case Op::SUBU:
-		tracker.write(instr.rd, builder.CreateSub(tracker.read(instr.rs), tracker.read(instr.rt),
-		                                          tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateSub(tracker.read_int(instr.rs), tracker.read_int(instr.rt),
+		                                              tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::ADDI:
 	case Op::ADDIU:
-		tracker.write(instr.rt, builder.CreateAdd(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
-		                                          tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateAdd(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
+		                                              tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::SLT:
 	{
-		Value *cmp = builder.CreateICmpSLT(tracker.read(instr.rs), tracker.read(instr.rt), "SLTCmp");
-		tracker.write(instr.rd,
-		              builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
-		                                   tracker.get_twine(instr.rd)));
+		Value *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "SLTCmp");
+		tracker.write_int(instr.rd,
+		                  builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		                                       tracker.get_twine(instr.rd)));
 		break;
 	}
 
 	case Op::SLTU:
 	{
-		Value *cmp = builder.CreateICmpULT(tracker.read(instr.rs), tracker.read(instr.rt), "ULTCmp");
-		tracker.write(instr.rd,
-		              builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
-		                                   tracker.get_twine(instr.rd)));
+		Value *cmp = builder.CreateICmpULT(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "ULTCmp");
+		tracker.write_int(instr.rd,
+		                  builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		                                       tracker.get_twine(instr.rd)));
 		break;
 	}
 
 	case Op::SLTI:
 	{
-		Value *cmp = builder.CreateICmpSLT(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SLTICmp");
-		tracker.write(instr.rt,
-		              builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
-		                                   tracker.get_twine(instr.rt)));
+		Value *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SLTICmp");
+		tracker.write_int(instr.rt,
+		                  builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		                                       tracker.get_twine(instr.rt)));
 		break;
 	}
 
 	case Op::SLTIU:
 	{
-		Value *cmp = builder.CreateICmpULT(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SLTIUCmp");
-		tracker.write(instr.rt,
-		              builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
-		                                   tracker.get_twine(instr.rt)));
+		Value *cmp = builder.CreateICmpULT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SLTIUCmp");
+		tracker.write_int(instr.rt,
+		                  builder.CreateSelect(cmp, ConstantInt::get(Type::getInt32Ty(ctx), 1), ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		                                       tracker.get_twine(instr.rt)));
 		break;
 	}
 
 	case Op::AND:
-		tracker.write(instr.rd, builder.CreateAnd(tracker.read(instr.rs), tracker.read(instr.rt), tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateAnd(tracker.read_int(instr.rs), tracker.read_int(instr.rt), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::OR:
-		tracker.write(instr.rd, builder.CreateOr(tracker.read(instr.rs), tracker.read(instr.rt), tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateOr(tracker.read_int(instr.rs), tracker.read_int(instr.rt), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::XOR:
-		tracker.write(instr.rd, builder.CreateXor(tracker.read(instr.rs), tracker.read(instr.rt), tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateXor(tracker.read_int(instr.rs), tracker.read_int(instr.rt), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::NOR:
-		tracker.write(instr.rd, builder.CreateNot(builder.CreateOr(tracker.read(instr.rs), tracker.read(instr.rt)), tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateNot(builder.CreateOr(tracker.read_int(instr.rs), tracker.read_int(instr.rt)), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::ANDI:
-		tracker.write(instr.rt, builder.CreateAnd(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.imm)), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateAnd(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.imm)), tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::ORI:
-		tracker.write(instr.rt, builder.CreateOr(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.imm)), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateOr(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.imm)), tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::XORI:
-		tracker.write(instr.rt, builder.CreateXor(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.imm)), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateXor(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), uint16_t(instr.imm)), tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::SLL:
-		tracker.write(instr.rt, builder.CreateShl(tracker.read(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateShl(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::SRL:
-		tracker.write(instr.rt, builder.CreateLShr(tracker.read(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateLShr(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::SRA:
-		tracker.write(instr.rt, builder.CreateAShr(tracker.read(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rt, builder.CreateAShr(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
 		break;
 
 	case Op::SLLV:
-		tracker.write(instr.rd, builder.CreateShl(tracker.read(instr.rt),
-		                                          builder.CreateAnd(tracker.read(instr.rs),
-		                                                            ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
-		                                          tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateShl(tracker.read_int(instr.rt),
+		                                              builder.CreateAnd(tracker.read_int(instr.rs),
+		                                                                ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
+		                                              tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SRLV:
-		tracker.write(instr.rd, builder.CreateLShr(tracker.read(instr.rt),
-		                                           builder.CreateAnd(tracker.read(instr.rs),
-		                                                             ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
-		                                           tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateLShr(tracker.read_int(instr.rt),
+		                                               builder.CreateAnd(tracker.read_int(instr.rs),
+		                                                                 ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
+		                                               tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SRAV:
-		tracker.write(instr.rd, builder.CreateAShr(tracker.read(instr.rt),
-		                                           builder.CreateAnd(tracker.read(instr.rs),
-		                                                             ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
-		                                           tracker.get_twine(instr.rd)));
+		tracker.write_int(instr.rd, builder.CreateAShr(tracker.read_int(instr.rt),
+		                                               builder.CreateAnd(tracker.read_int(instr.rs),
+		                                                                 ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
+		                                               tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::LUI:
-		tracker.write(instr.rt, ConstantInt::get(Type::getInt32Ty(ctx), (instr.imm & 0xffff) << 16));
+		tracker.write_int(instr.rt, ConstantInt::get(Type::getInt32Ty(ctx), (instr.imm & 0xffff) << 16));
 		break;
 
 	case Op::MULT:
 	{
-		auto *mul = builder.CreateMul(builder.CreateSExt(tracker.read(instr.rs), Type::getInt64Ty(ctx), "MulSExt"),
-		                              builder.CreateSExt(tracker.read(instr.rt), Type::getInt64Ty(ctx), "MulSExt"), "Mul");
+		auto *mul = builder.CreateMul(builder.CreateSExt(tracker.read_int(instr.rs), Type::getInt64Ty(ctx), "MulSExt"),
+		                              builder.CreateSExt(tracker.read_int(instr.rt), Type::getInt64Ty(ctx), "MulSExt"), "Mul");
 
-		tracker.write(32, builder.CreateTrunc(mul, Type::getInt32Ty(ctx), "LO"));
-		tracker.write(33, builder.CreateTrunc(builder.CreateLShr(mul, ConstantInt::get(Type::getInt64Ty(ctx), 32)),
-		                                      Type::getInt32Ty(ctx), "HI"));
+		tracker.write_int(REG_LO, builder.CreateTrunc(mul, Type::getInt32Ty(ctx), "LO"));
+		tracker.write_int(REG_HI, builder.CreateTrunc(builder.CreateLShr(mul, ConstantInt::get(Type::getInt64Ty(ctx), 32)),
+		                                              Type::getInt32Ty(ctx), "HI"));
 		break;
 	}
 
 	case Op::MULTU:
 	{
-		auto *mul = builder.CreateMul(builder.CreateZExt(tracker.read(instr.rs), Type::getInt64Ty(ctx), "MulZExt"),
-		                              builder.CreateZExt(tracker.read(instr.rt), Type::getInt64Ty(ctx), "MulZExt"), "Mul");
+		auto *mul = builder.CreateMul(builder.CreateZExt(tracker.read_int(instr.rs), Type::getInt64Ty(ctx), "MulZExt"),
+		                              builder.CreateZExt(tracker.read_int(instr.rt), Type::getInt64Ty(ctx), "MulZExt"), "Mul");
 
-		tracker.write(32, builder.CreateTrunc(mul, Type::getInt32Ty(ctx), "LO"));
-		tracker.write(33, builder.CreateTrunc(builder.CreateLShr(mul, ConstantInt::get(Type::getInt64Ty(ctx), 32)),
-		                                      Type::getInt32Ty(ctx), "HI"));
+		tracker.write_int(REG_LO, builder.CreateTrunc(mul, Type::getInt32Ty(ctx), "LO"));
+		tracker.write_int(REG_HI, builder.CreateTrunc(builder.CreateLShr(mul, ConstantInt::get(Type::getInt64Ty(ctx), 32)),
+		                                              Type::getInt32Ty(ctx), "HI"));
 		break;
 	}
 
 	case Op::DIV:
 	{
-		auto *div = builder.CreateSDiv(tracker.read(instr.rs), tracker.read(instr.rt), "LO");
-		auto *rem = builder.CreateSRem(tracker.read(instr.rs), tracker.read(instr.rt), "HI"); // Probably not correct.
-		tracker.write(32, div);
-		tracker.write(33, rem);
+		auto *div = builder.CreateSDiv(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "LO");
+		auto *rem = builder.CreateSRem(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "HI"); // Probably not correct.
+		tracker.write_int(REG_LO, div);
+		tracker.write_int(REG_HI, rem);
 		break;
 	}
 
 	case Op::DIVU:
 	{
-		auto *div = builder.CreateUDiv(tracker.read(instr.rs), tracker.read(instr.rt), "LO");
-		auto *rem = builder.CreateURem(tracker.read(instr.rs), tracker.read(instr.rt), "HI"); // Probably not correct.
-		tracker.write(32, div);
-		tracker.write(33, rem);
+		auto *div = builder.CreateUDiv(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "LO");
+		auto *rem = builder.CreateURem(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "HI"); // Probably not correct.
+		tracker.write_int(REG_LO, div);
+		tracker.write_int(REG_HI, rem);
 		break;
 	}
 
 	case Op::MFHI:
-		tracker.write(instr.rd, tracker.read(33));
+		tracker.write_int(instr.rd, tracker.read_int(REG_HI));
 		break;
 
 	case Op::MFLO:
-		tracker.write(instr.rd, tracker.read(32));
+		tracker.write_int(instr.rd, tracker.read_int(REG_LO));
 		break;
 
 	case Op::MTHI:
-		tracker.write(33, tracker.read(instr.rs));
+		tracker.write_int(REG_HI, tracker.read_int(instr.rs));
 		break;
 
 	case Op::MTLO:
-		tracker.write(32, tracker.read(instr.rs));
+		tracker.write_int(REG_LO, tracker.read_int(instr.rs));
 		break;
 
 	case Op::J:
@@ -1305,7 +1380,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::JAL:
 	{
 		Address target = (addr & 0xf0000000u) + instr.imm * 4;
-		tracker.write(31, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
+		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
@@ -1321,7 +1396,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::JR:
 	{
-		Value *target = tracker.read(instr.rs);
+		Value *target = tracker.read_int(instr.rs);
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 
@@ -1349,13 +1424,13 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::JALR:
 	{
-		tracker.write(31, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
+		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 
 		tracker.flush();
-		auto *call = create_call(recompiler, bb, tracker.read(instr.rs), addr + 8);
+		auto *call = create_call(recompiler, bb, tracker.read_int(instr.rs), addr + 8);
 		Value *values[] = { argument };
 		builder.SetInsertPoint(bb);
 		builder.CreateCall(call, values);
@@ -1368,7 +1443,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
-		auto *cmp = builder.CreateICmpEQ(tracker.read(instr.rs), tracker.read(instr.rt), "BEQ");
+		auto *cmp = builder.CreateICmpEQ(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BEQ");
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1382,7 +1457,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
-		auto *cmp = builder.CreateICmpNE(tracker.read(instr.rs), tracker.read(instr.rt), "BNE");
+		auto *cmp = builder.CreateICmpNE(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BNE");
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1396,7 +1471,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
-		auto *cmp = builder.CreateICmpSLT(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
+		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1410,7 +1485,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
-		auto *cmp = builder.CreateICmpSGE(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
+		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1424,7 +1499,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
-		auto *cmp = builder.CreateICmpSGT(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGTZ");
+		auto *cmp = builder.CreateICmpSGT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGTZ");
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1438,7 +1513,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
-		auto *cmp = builder.CreateICmpSLE(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLEZ");
+		auto *cmp = builder.CreateICmpSLE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLEZ");
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1450,14 +1525,14 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::BLTZAL:
 	{
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
-		tracker.write(31, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
+		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 
 		tracker.flush();
 
-		auto *cmp = builder.CreateICmpSLT(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
+		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
 		auto *bb_call = BasicBlock::Create(ctx, "IndirectCallPath", recompiler->get_current_function());
 		auto *bb_merge = BasicBlock::Create(ctx, "IndirectCallMerge", recompiler->get_current_function());
 		BranchInst::Create(bb_call, bb_merge, cmp, bb);
@@ -1474,14 +1549,14 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::BGEZAL:
 	{
 		Address target = addr + 4 + int16_t(instr.imm) * 4;
-		tracker.write(31, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
+		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 
 		tracker.flush();
 
-		auto *cmp = builder.CreateICmpSGE(tracker.read(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
+		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
 		auto *bb_call = BasicBlock::Create(ctx, "IndirectCallPath", recompiler->get_current_function());
 		auto *bb_merge = BasicBlock::Create(ctx, "IndirectCallMerge", recompiler->get_current_function());
 		BranchInst::Create(bb_call, bb_merge, cmp, bb);
@@ -1513,82 +1588,82 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::LB:
 	{
 		auto *loaded = create_load8(recompiler, bb,
-		                            builder.CreateAdd(tracker.read(instr.rs),
+		                            builder.CreateAdd(tracker.read_int(instr.rs),
 		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LBAddr"));
 		builder.SetInsertPoint(bb);
 		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
-		tracker.write(instr.rt, loaded);
+		tracker.write_int(instr.rt, loaded);
 		break;
 	}
 
 	case Op::LH:
 	{
 		auto *loaded = create_load16(recompiler, bb,
-		                             builder.CreateAdd(tracker.read(instr.rs),
+		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LHAddr"));
 		builder.SetInsertPoint(bb);
 		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
-		tracker.write(instr.rt, loaded);
+		tracker.write_int(instr.rt, loaded);
 		break;
 	}
 
 	case Op::LBU:
 	{
 		auto *loaded = create_load8(recompiler, bb,
-		                            builder.CreateAdd(tracker.read(instr.rs),
+		                            builder.CreateAdd(tracker.read_int(instr.rs),
 		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LBAddr"));
 		builder.SetInsertPoint(bb);
 		loaded = builder.CreateZExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
-		tracker.write(instr.rt, loaded);
+		tracker.write_int(instr.rt, loaded);
 		break;
 	}
 
 	case Op::LHU:
 	{
 		auto *loaded = create_load16(recompiler, bb,
-		                             builder.CreateAdd(tracker.read(instr.rs),
+		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LHAddr"));
 		builder.SetInsertPoint(bb);
 		loaded = builder.CreateZExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
-		tracker.write(instr.rt, loaded);
+		tracker.write_int(instr.rt, loaded);
 		break;
 	}
 
 	case Op::LW:
 	{
 		auto *loaded = create_load32(recompiler, bb,
-		                             builder.CreateAdd(tracker.read(instr.rs),
+		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWAddr"));
 		builder.SetInsertPoint(bb);
 		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
-		tracker.write(instr.rt, loaded);
+		tracker.write_int(instr.rt, loaded);
 		break;
 	}
 
 	case Op::SB:
 	{
 		create_store8(recompiler, bb,
-		              builder.CreateAdd(tracker.read(instr.rs),
+		              builder.CreateAdd(tracker.read_int(instr.rs),
 		                                ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SBAddr"),
-		              tracker.read(instr.rt));
+		              tracker.read_int(instr.rt));
 		break;
 	}
 
 	case Op::SH:
 	{
 		create_store16(recompiler, bb,
-		               builder.CreateAdd(tracker.read(instr.rs),
+		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SHAddr"),
-		               tracker.read(instr.rt));
+		               tracker.read_int(instr.rt));
 		break;
 	}
 
 	case Op::SW:
 	{
 		create_store32(recompiler, bb,
-		               builder.CreateAdd(tracker.read(instr.rs),
+		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
-		               tracker.read(instr.rt));
+		               tracker.read_int(instr.rt));
 		break;
 	}
 
@@ -1611,6 +1686,8 @@ void MIPS::recompile_basic_block(
 		IRBuilder<> builder(bb);
 		tracker.set_builder(&builder);
 		recompile_instruction(recompiler, bb, builder, tracker, addr);
+		if (mips_opcode_is_branch(load_instr(addr).op))
+			addr += 4;
 	}
 
 	if (block.terminator == Terminator::DirectBranch)
@@ -1829,7 +1906,8 @@ int main(int argc, char **argv)
 {
 	MIPS mips;
 	Elf32_Ehdr ehdr;
-	if (!load_elf(argv[1], ehdr, mips.get_address_space()))
+	std::unordered_map<std::string, Address> symbol_table;
+	if (!load_elf(argv[1], ehdr, mips.get_address_space(), symbol_table))
 		return 1;
 
 	mips.enter(ehdr.e_entry);
