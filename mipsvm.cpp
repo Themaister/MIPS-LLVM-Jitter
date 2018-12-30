@@ -271,8 +271,8 @@ static bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSp
 				return 1;
 
 			int prot = 0;
-			if (flags & PF_X)
-				prot |= PROT_EXEC;
+			//if (flags & PF_X)
+			//	prot |= PROT_EXEC;
 			if (flags & PF_R)
 				prot |= PROT_READ;
 			if (flags & PF_W)
@@ -306,6 +306,10 @@ static bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSp
 
 				// Fill in the section partially.
 				memcpy(page + copy_offset, mapped + offset, file_size);
+
+				// Disable writes.
+				if ((prot & PROT_WRITE) == 0)
+					mprotect(page, end_memory_segment - begin_memory_segment, prot);
 
 				for (uint32_t addr = begin_memory_segment; addr < end_memory_segment; addr += VirtualAddressSpace::PageSize)
 					addr_space.set_page(addr / VirtualAddressSpace::PageSize, page + (addr - begin_memory_segment));
