@@ -2,8 +2,8 @@ CC := mipsel-linux-gnu-gcc
 LD := mipsel-linux-gnu-ld
 AS := mipsel-linux-gnu-as
 OBJCOPY := mipsel-linux-gnu-objcopy
-CFLAGS = -std=gnu99 -nostdlib -mno-abicalls -mabi=eabi -march=vr4300 -mgp32
-ASFLAGS := -mabi=eabi -march=vr4300 -mgp32
+CFLAGS = -std=gnu99 -nostdlib -mno-abicalls -mabi=eabi -march=r3000 -mgp32
+ASFLAGS := -mabi=eabi -march=r3000 -mgp32
 CFLAGS += -O2
 
 AS_FILES := $(wildcard *.s)
