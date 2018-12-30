@@ -516,10 +516,12 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 
 		case 0xc:
 			instr.op = Op::SYSCALL;
+			instr.imm = imm26 >> 6;
 			break;
 
 		case 0xd:
 			instr.op = Op::BREAK;
+			instr.imm = imm26 >> 6;
 			break;
 
 		case 0x10:
@@ -796,8 +798,8 @@ public:
 	uint16_t load16(Address addr) const noexcept;
 	uint8_t load8(Address addr) const noexcept;
 	void sigill(Address addr) const noexcept;
-	void op_break(Address addr) noexcept;
-	void op_syscall(Address addr) noexcept;
+	void op_break(Address addr, uint32_t code) noexcept;
+	void op_syscall(Address addr, uint32_t code) noexcept;
 	StubCallPtr call_addr(Address addr, Address expected_addr) noexcept;
 	StubCallPtr jump_addr(Address addr) noexcept;
 
@@ -833,8 +835,8 @@ private:
 	Value *create_load16(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr);
 	Value *create_load8(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr);
 	void create_sigill(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr);
-	void create_break(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr);
-	void create_syscall(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr);
+	void create_break(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr, uint32_t code);
+	void create_syscall(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr, uint32_t code);
 
 	Value *create_lwl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *old_value, Value *addr);
 	Value *create_lwr(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *old_value, Value *addr);
@@ -914,14 +916,14 @@ static void backend_sigill(RegisterState *regs, Address addr)
 	static_cast<MIPS *>(regs)->sigill(addr);
 }
 
-static void backend_break(RegisterState *regs, Address addr)
+static void backend_break(RegisterState *regs, Address addr, uint32_t code)
 {
-	static_cast<MIPS *>(regs)->op_break(addr);
+	static_cast<MIPS *>(regs)->op_break(addr, code);
 }
 
-static void backend_syscall(RegisterState *regs, Address addr)
+static void backend_syscall(RegisterState *regs, Address addr, uint32_t code)
 {
-	static_cast<MIPS *>(regs)->op_syscall(addr);
+	static_cast<MIPS *>(regs)->op_syscall(addr, code);
 }
 
 static uint32_t backend_lwl(RegisterState *regs, Address addr, uint32_t old_value)
@@ -1113,16 +1115,16 @@ void MIPS::sigill(Address addr) const noexcept
 	kill(getpid(), SIGILL);
 }
 
-void MIPS::op_break(Address addr) noexcept
+void MIPS::op_break(Address addr, uint32_t) noexcept
 {
 	exit_pc = addr;
 	longjmp(jump_buffer, static_cast<int>(ExitCondition::ExitBreak));
 }
 
-void MIPS::op_syscall(Address addr) noexcept
+void MIPS::op_syscall(Address addr, uint32_t code) noexcept
 {
 	// Syscall
-	unsigned syscall = scalar_registers[REG_V0];
+	unsigned syscall = code;
 	if (syscall < SYSCALL_COUNT && syscall_table[syscall])
 		(this->*syscall_table[syscall])();
 	else
@@ -1733,7 +1735,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::SYSCALL:
 	{
 		tracker.flush();
-		create_syscall(recompiler, tracker.get_argument(), bb, addr);
+		create_syscall(recompiler, tracker.get_argument(), bb, addr, instr.imm);
 		tracker.invalidate();
 		break;
 	}
@@ -1741,7 +1743,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::BREAK:
 	{
 		tracker.flush();
-		create_break(recompiler, tracker.get_argument(), bb, addr);
+		create_break(recompiler, tracker.get_argument(), bb, addr, instr.imm);
 		builder.SetInsertPoint(bb);
 		builder.CreateRetVoid();
 		break;
@@ -2135,37 +2137,37 @@ void MIPS::create_sigill(Recompiler *recompiler, Value *argument, BasicBlock *bb
 	builder.CreateCall(calls.sigill, values);
 }
 
-void MIPS::create_break(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr)
+void MIPS::create_break(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr, uint32_t code)
 {
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
 	if (!calls.op_break)
 	{
-		Type *load_types[] = { Type::getInt32PtrTy(ctx), Type::getInt32Ty(ctx) };
+		Type *load_types[] = { Type::getInt32PtrTy(ctx), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *load_type = FunctionType::get(Type::getVoidTy(ctx), load_types, false);
 		calls.op_break = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
 		                                        "__recompiler_break", recompiler->get_current_module());
 	}
 
-	Value *values[] = { argument, ConstantInt::get(Type::getInt32Ty(ctx), addr) };
+	Value *values[] = { argument, ConstantInt::get(Type::getInt32Ty(ctx), addr), ConstantInt::get(Type::getInt32Ty(ctx), code) };
 	builder.CreateCall(calls.op_break, values);
 }
 
-void MIPS::create_syscall(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr)
+void MIPS::create_syscall(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr, uint32_t code)
 {
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
 	if (!calls.op_syscall)
 	{
-		Type *load_types[] = { Type::getInt32PtrTy(ctx), Type::getInt32Ty(ctx) };
+		Type *load_types[] = { Type::getInt32PtrTy(ctx), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *load_type = FunctionType::get(Type::getVoidTy(ctx), load_types, false);
 		calls.op_syscall = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
 		                                          "__recompiler_syscall", recompiler->get_current_module());
 	}
 
-	Value *values[] = { argument, ConstantInt::get(Type::getInt32Ty(ctx), addr) };
+	Value *values[] = { argument, ConstantInt::get(Type::getInt32Ty(ctx), addr), ConstantInt::get(Type::getInt32Ty(ctx), code) };
 	builder.CreateCall(calls.op_syscall, values);
 }
 
@@ -2237,6 +2239,8 @@ int main(int argc, char **argv)
 
 	call_int(mips, symbol_table, "test_multu", 2, 4, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), 8); });
 	call_int(mips, symbol_table, "test_multu", 0xff000000u, 0xfff00000u, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), uint64_t(0xff000000u) * uint64_t(0xfff00000u)); });
+
+	mips.enter(ehdr.e_entry);
 
 	return 0;
 }

@@ -29,8 +29,7 @@ __start:
 .ent \call
 
 \call:
-	li $v0, \code
-	syscall
+	syscall \code
 	jr $ra
 
 .end \call
