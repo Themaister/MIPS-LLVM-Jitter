@@ -1,5 +1,5 @@
 .bss
-.align 16
+.align 12
 .comm __stack, 1024 * 1024
 
 .text

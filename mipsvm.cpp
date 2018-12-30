@@ -2209,6 +2209,11 @@ int main(int argc, char **argv)
 	for (unsigned i = 0; i < 16; i++)
 		mips.store8(stack + i, i);
 
+	mips.scalar_registers[REG_SP] = stack + 64 * 1024;
+
+	call_int(mips, symbol_table, "call_test", 20, 20, [](int32_t v0, int32_t) { assert_equal(v0, 40); });
+	call_int(mips, symbol_table, "call_test", 30, 20, [](int32_t v0, int32_t) { assert_equal(v0, 30); });
+
 	call_int(mips, symbol_table, "test_ulw_emu", stack, 0, [](int32_t v0, int32_t) { assert_equal(v0, (0 << 0) | (1 << 8) | (2 << 16) | (3 << 24)); });
 	call_int(mips, symbol_table, "test_ulw_emu", stack, 1, [](int32_t v0, int32_t) { assert_equal(v0, (1 << 0) | (2 << 8) | (3 << 16) | (4 << 24)); });
 	call_int(mips, symbol_table, "test_ulw_emu", stack, 2, [](int32_t v0, int32_t) { assert_equal(v0, (2 << 0) | (3 << 8) | (4 << 16) | (5 << 24)); });
