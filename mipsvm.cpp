@@ -1290,6 +1290,9 @@ void MIPS::op_break(Address addr, uint32_t) noexcept
 
 void MIPS::op_syscall(Address addr, uint32_t code) noexcept
 {
+	// On Linux, syscall number is encoded in $v0.
+	code = scalar_registers[REG_V0];
+
 	fprintf(stderr, "SYSCALL %u called!\n", code);
 
 	code -= 4000; // O32 API.
