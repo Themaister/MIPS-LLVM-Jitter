@@ -1734,21 +1734,21 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::SLLV:
 		tracker.write_int(instr.rd, builder.CreateShl(tracker.read_int(instr.rt),
 		                                              builder.CreateAnd(tracker.read_int(instr.rs),
-		                                                                ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
+		                                                                ConstantInt::get(Type::getInt32Ty(ctx), 31), "ShiftMask"),
 		                                              tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SRLV:
 		tracker.write_int(instr.rd, builder.CreateLShr(tracker.read_int(instr.rt),
 		                                               builder.CreateAnd(tracker.read_int(instr.rs),
-		                                                                 ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
+		                                                                 ConstantInt::get(Type::getInt32Ty(ctx), 31), "ShiftMask"),
 		                                               tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SRAV:
 		tracker.write_int(instr.rd, builder.CreateAShr(tracker.read_int(instr.rt),
 		                                               builder.CreateAnd(tracker.read_int(instr.rs),
-		                                                                 ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), "ShiftMask"),
+		                                                                 ConstantInt::get(Type::getInt32Ty(ctx), 31), "ShiftMask"),
 		                                               tracker.get_twine(instr.rd)));
 		break;
 
