@@ -223,10 +223,10 @@ struct RegisterTracker
 
 	IRBuilder<> *builder = nullptr;
 	Value *arg;
-	Value *int_registers[REG_COUNT] = {};
-	Value *float_registers[32] = {};
+	Value *int_registers[RegisterState::MaxIntegerRegisters] = {};
+	Value *float_registers[RegisterState::MaxFloatRegisters] = {};
 	uint64_t dirty_int = 0;
-	uint32_t dirty_float = 0;
+	uint64_t dirty_float = 0;
 };
 
 class VirtualAddressSpace
