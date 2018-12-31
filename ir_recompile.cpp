@@ -34,15 +34,15 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 {
 	auto &visit_order = function.get_visit_order();
 
-	auto module = jitter->create_module(to_string(visit_order.front()->block.block_start));
+	auto module = jitter->create_module(to_string(function.get_entry_address()));
 	this->module = module.get();
 	auto &ctx = module->getContext();
 
 	// Create our function.
-	llvm::Type *types[1] = { llvm::Type::getInt32PtrTy(ctx) };
+	llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx) };
 	auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
 	auto *func = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
-	                                    to_string(visit_order.front()->block.block_start),
+	                                    to_string(function.get_entry_address()),
 	                                    module.get());
 	auto *argument = &func->args().begin()[0];
 	this->function = func;
@@ -80,7 +80,7 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 	}
 
 	result.handle = jitter->add_module(move(module));
-	result.call = (void (*)(RegisterState *))jitter->get_symbol_address(to_string(visit_order.front()->block.block_start));
+	result.call = (void (*)(RegisterState *))jitter->get_symbol_address(to_string(function.get_entry_address()));
 	return result;
 }
 }

@@ -16,7 +16,7 @@ using namespace JITTIR;
 using namespace llvm;
 
 //#define LS_DEBUG
-#define STEP_DEBUG
+//#define STEP_DEBUG
 
 #ifdef STEP_DEBUG
 #define STEP() do { \
@@ -25,8 +25,15 @@ using namespace llvm;
 	call_step(recompiler, tracker.get_argument(), bb); \
 	tracker.invalidate(); \
 } while(0)
+
+#define STEP_AFTER() do { \
+	tracker.flush(); \
+	call_step_after(recompiler, tracker.get_argument(), bb); \
+	tracker.invalidate(); \
+} while(0)
 #else
 #define STEP() ((void)0)
+#define STEP_AFTER() ((void)0)
 #endif
 
 enum Syscalls
@@ -966,6 +973,7 @@ public:
 	void swl(Address addr, uint32_t value) noexcept;
 	void swr(Address addr, uint32_t value) noexcept;
 	void step() noexcept;
+	void step_after() noexcept;
 
 	void store32(Address addr, uint32_t value) noexcept;
 	void store16(Address addr, uint32_t value) noexcept;
@@ -1019,6 +1027,7 @@ private:
 	void create_swl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value);
 	void create_swr(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value);
 	void call_step(Recompiler *recompiler, Value *argument, BasicBlock *bb);
+	void call_step_after(Recompiler *recompiler, Value *argument, BasicBlock *bb);
 
 	struct
 	{
@@ -1038,6 +1047,7 @@ private:
 		llvm::Function *op_break = nullptr;
 		llvm::Function *op_syscall = nullptr;
 		llvm::Function *step = nullptr;
+		llvm::Function *step_after = nullptr;
 	} calls;
 
 	using SyscallPtr = void (MIPS::*)();
@@ -1045,6 +1055,8 @@ private:
 	void syscall_exit();
 	void syscall_write();
 	void syscall_read();
+
+	RegisterState old_state = {};
 };
 
 extern "C"
@@ -1128,6 +1140,11 @@ static void backend_step(RegisterState *regs)
 {
 	static_cast<MIPS *>(regs)->step();
 }
+
+static void backend_step_after(RegisterState *regs)
+{
+	static_cast<MIPS *>(regs)->step_after();
+}
 }
 
 MIPS::MIPS()
@@ -1144,6 +1161,7 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_break", backend_break);
 	jitter.add_external_symbol("__recompiler_syscall", backend_syscall);
 	jitter.add_external_symbol("__recompiler_step", backend_step);
+	jitter.add_external_symbol("__recompiler_step_after", backend_step_after);
 	jitter.add_external_symbol("__recompiler_lwl", backend_lwl);
 	jitter.add_external_symbol("__recompiler_lwr", backend_lwr);
 	jitter.add_external_symbol("__recompiler_swl", backend_swl);
@@ -1279,6 +1297,22 @@ void MIPS::step() noexcept
 	fprintf(stderr, "Executing PC 0x%x:\n", scalar_registers[REG_PC]);
 	//for (int i = 0; i < REG_COUNT; i++)
 	//	fprintf(stderr, "   [%s] = 0x%x (%d)\n", register_names[i], scalar_registers[i], scalar_registers[i]);
+
+	memcpy(old_state.scalar_registers, scalar_registers, sizeof(scalar_registers));
+	memcpy(old_state.float_registers, float_registers, sizeof(float_registers));
+}
+
+void MIPS::step_after() noexcept
+{
+	for (int i = 0; i < RegisterState::MaxIntegerRegisters; i++)
+	{
+		if (old_state.scalar_registers[i] != scalar_registers[i])
+		{
+			fprintf(stderr, "    [%s] = 0x%x (%d) <- 0x%x (%d)\n",
+			        register_names[i], scalar_registers[i], scalar_registers[i],
+			        old_state.scalar_registers[i], old_state.scalar_registers[i]);
+		}
+	}
 }
 
 uint32_t MIPS::load32(Address addr) const noexcept
@@ -1549,6 +1583,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 {
 	auto &ctx = builder.getContext();
 	auto instr = load_instr(addr);
+	bool can_do_step_after = true;
 
 	STEP();
 
@@ -1803,11 +1838,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BEQ:
 	{
+		auto *cmp = builder.CreateICmpEQ(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BEQ");
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
 		tracker.flush();
-		auto *cmp = builder.CreateICmpEQ(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BEQ");
 		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1818,11 +1853,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BNE:
 	{
+		auto *cmp = builder.CreateICmpNE(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BNE");
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
 		tracker.flush();
-		auto *cmp = builder.CreateICmpNE(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BNE");
 		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1833,11 +1868,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BLTZ:
 	{
+		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
 		tracker.flush();
-		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
 		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1848,11 +1883,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BGEZ:
 	{
+		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
 		tracker.flush();
-		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
 		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1863,11 +1898,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BGTZ:
 	{
+		auto *cmp = builder.CreateICmpSGT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGTZ");
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
 		tracker.flush();
-		auto *cmp = builder.CreateICmpSGT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGTZ");
 		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1878,11 +1913,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BLEZ:
 	{
+		auto *cmp = builder.CreateICmpSLE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLEZ");
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		builder.SetInsertPoint(bb);
 		tracker.flush();
-		auto *cmp = builder.CreateICmpSLE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLEZ");
 		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
@@ -1893,6 +1928,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BLTZAL:
 	{
+		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
 		Address target = instr.imm;
 		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
@@ -1901,7 +1937,6 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 		tracker.flush();
 
-		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
 		auto *bb_call = BasicBlock::Create(ctx, "IndirectCallPath", recompiler->get_current_function());
 		auto *bb_merge = BasicBlock::Create(ctx, "IndirectCallMerge", recompiler->get_current_function());
 		BranchInst::Create(bb_call, bb_merge, cmp, bb);
@@ -1917,6 +1952,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BGEZAL:
 	{
+		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
 		Address target = instr.imm;
 		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
@@ -1925,7 +1961,6 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 		tracker.flush();
 
-		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
 		auto *bb_call = BasicBlock::Create(ctx, "IndirectCallPath", recompiler->get_current_function());
 		auto *bb_merge = BasicBlock::Create(ctx, "IndirectCallMerge", recompiler->get_current_function());
 		BranchInst::Create(bb_call, bb_merge, cmp, bb);
@@ -1953,6 +1988,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		create_break(recompiler, tracker.get_argument(), bb, addr, instr.imm);
 		builder.SetInsertPoint(bb);
 		builder.CreateRetVoid();
+		can_do_step_after = false;
 		break;
 	}
 
@@ -2148,12 +2184,16 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	}
 
 	default:
+		can_do_step_after = false;
 		tracker.flush();
 		create_sigill(recompiler, tracker.get_argument(), bb, addr);
 		builder.SetInsertPoint(bb);
 		builder.CreateRetVoid();
 		break;
 	}
+
+	if (can_do_step_after && !mips_opcode_is_branch(instr.op))
+		STEP_AFTER();
 }
 
 void MIPS::recompile_basic_block(
@@ -2466,6 +2506,23 @@ void MIPS::call_step(Recompiler *recompiler, Value *argument, BasicBlock *bb)
 
 	Value *values[] = { argument };
 	builder.CreateCall(calls.step, values);
+}
+
+void MIPS::call_step_after(Recompiler *recompiler, Value *argument, BasicBlock *bb)
+{
+	IRBuilder<> builder(bb);
+	auto &ctx = builder.getContext();
+
+	if (!calls.step_after)
+	{
+		Type *load_types[] = { Type::getInt32PtrTy(ctx) };
+		auto *load_type = FunctionType::get(Type::getVoidTy(ctx), load_types, false);
+		calls.step_after = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
+		                                          "__recompiler_step_after", recompiler->get_current_module());
+	}
+
+	Value *values[] = { argument };
+	builder.CreateCall(calls.step_after, values);
 }
 
 template <typename Call>

@@ -28,11 +28,7 @@ struct Block
 struct BlockMeta
 {
 	Block block;
-
-	void add_pred(BlockMeta *block);
-	std::vector<BlockMeta *> preds;
 	BlockMeta *targets[2] = {};
-	bool resolve_complete = false;
 };
 
 class BlockAnalysisBackend
@@ -61,12 +57,10 @@ public:
 private:
 	BlockAnalysisBackend *backend = nullptr;
 	std::unordered_map<Address, std::unique_ptr<BlockMeta>> block_map;
-	std::vector<BlockMeta *> leaf_blocks;
 	std::vector<BlockMeta *> visit_order;
 	Address entry_addr = 0;
 
 	BlockMeta *analyze_from_entry_inner(Address addr); // Map out all static execution paths from an address.
-	void resolve_block(BlockMeta *meta);
 	void reset();
 };
 }
