@@ -17,12 +17,69 @@ using namespace llvm;
 
 #define LS_DEBUG
 
+#define STEP_DEBUG
+#ifdef STEP_DEBUG
+#define STEP() do { \
+	tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr)); \
+	tracker.flush(); \
+	call_step(recompiler, tracker.get_argument(), bb); \
+	tracker.invalidate(); \
+} while(0)
+#else
+#define STEP() ((void)0)
+#endif
+
 enum Syscalls
 {
-	SYSCALL_EXIT = 0,
-	SYSCALL_WRITE,
-	SYSCALL_READ,
+	SYSCALL_SYSCALL = 0,
+	SYSCALL_EXIT = 1,
+	SYSCALL_FORK = 2,
+	SYSCALL_READ = 3,
+	SYSCALL_WRITE = 4,
+	SYSCALL_OPEN = 5,
+	SYSCALL_CLOSE = 6,
+	SYSCALL_WAITPID = 7,
+	SYSCALL_CREAT = 8,
+	SYSCALL_LINK = 9,
 	SYSCALL_COUNT
+};
+
+static const char *register_names[] = {
+	"zero",
+	"at",
+	"v0",
+	"v1",
+	"a0",
+	"a1",
+	"a2",
+	"a3",
+	"t0",
+	"t1",
+	"t2",
+	"t3",
+	"t4",
+	"t5",
+	"t6",
+	"t7",
+	"s0",
+	"s1",
+	"s2",
+	"s3",
+	"s4",
+	"s5",
+	"s6",
+	"s7",
+	"t8",
+	"t9",
+	"k0",
+	"k1",
+	"gp",
+	"sp",
+	"fp",
+	"ra",
+	"lo",
+	"hi",
+	"pc",
 };
 
 enum Registers
@@ -624,13 +681,13 @@ static MIPSInstruction decode_mips_instruction(Address pc, uint32_t word)
 				instr.op = Op::NOP;
 			break;
 
-		case 0x28:
+		case 0x2a:
 			instr.op = Op::SLT;
 			if (instr.rd == 0)
 				instr.op = Op::NOP;
 			break;
 
-		case 0x29:
+		case 0x2b:
 			instr.op = Op::SLTU;
 			if (instr.rd == 0)
 				instr.op = Op::NOP;
@@ -884,6 +941,7 @@ public:
 	uint32_t lwr(Address addr, uint32_t old_value) const noexcept;
 	void swl(Address addr, uint32_t value) noexcept;
 	void swr(Address addr, uint32_t value) noexcept;
+	void step() noexcept;
 
 	void store32(Address addr, uint32_t value) noexcept;
 	void store16(Address addr, uint32_t value) noexcept;
@@ -936,6 +994,7 @@ private:
 	Value *create_lwr(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *old_value, Value *addr);
 	void create_swl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value);
 	void create_swr(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value);
+	void call_step(Recompiler *recompiler, Value *argument, BasicBlock *bb);
 
 	struct
 	{
@@ -954,6 +1013,7 @@ private:
 		llvm::Function *sigill = nullptr;
 		llvm::Function *op_break = nullptr;
 		llvm::Function *op_syscall = nullptr;
+		llvm::Function *step = nullptr;
 	} calls;
 
 	using SyscallPtr = void (MIPS::*)();
@@ -1039,6 +1099,11 @@ static void backend_swr(RegisterState *regs, Address addr, uint32_t value)
 {
 	static_cast<MIPS *>(regs)->swr(addr, value);
 }
+
+static void backend_step(RegisterState *regs)
+{
+	static_cast<MIPS *>(regs)->step();
+}
 }
 
 MIPS::MIPS()
@@ -1054,6 +1119,7 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_sigill", backend_sigill);
 	jitter.add_external_symbol("__recompiler_break", backend_break);
 	jitter.add_external_symbol("__recompiler_syscall", backend_syscall);
+	jitter.add_external_symbol("__recompiler_step", backend_step);
 	jitter.add_external_symbol("__recompiler_lwl", backend_lwl);
 	jitter.add_external_symbol("__recompiler_lwr", backend_lwr);
 	jitter.add_external_symbol("__recompiler_swl", backend_swl);
@@ -1183,6 +1249,13 @@ void MIPS::swr(Address addr, uint32_t value) noexcept
 	}
 }
 
+void MIPS::step() noexcept
+{
+	fprintf(stderr, "Executing PC 0x%x:\n", scalar_registers[REG_PC]);
+	for (int i = 0; i < REG_COUNT; i++)
+		fprintf(stderr, "   [%s] = 0x%x (%d)\n", register_names[i], scalar_registers[i], scalar_registers[i]);
+}
+
 uint32_t MIPS::load32(Address addr) const noexcept
 {
 	auto *ptr = static_cast<uint32_t *>(addr_space.get_page(addr / VirtualAddressSpace::PageSize));
@@ -1217,6 +1290,9 @@ void MIPS::op_break(Address addr, uint32_t) noexcept
 
 void MIPS::op_syscall(Address addr, uint32_t code) noexcept
 {
+	fprintf(stderr, "SYSCALL %u called!\n", code);
+
+	code -= 4000; // O32 API.
 	// Syscall
 	unsigned syscall = code;
 	if (syscall < SYSCALL_COUNT && syscall_table[syscall])
@@ -1448,6 +1524,9 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 {
 	auto &ctx = builder.getContext();
 	auto instr = load_instr(addr);
+
+	STEP();
+
 	switch (instr.op)
 	{
 	case Op::NOP:
@@ -1537,15 +1616,15 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 
 	case Op::SLL:
-		tracker.write_int(instr.rt, builder.CreateShl(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rd, builder.CreateShl(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SRL:
-		tracker.write_int(instr.rt, builder.CreateLShr(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rd, builder.CreateLShr(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SRA:
-		tracker.write_int(instr.rt, builder.CreateAShr(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rt)));
+		tracker.write_int(instr.rd, builder.CreateAShr(tracker.read_int(instr.rt), ConstantInt::get(Type::getInt32Ty(ctx), instr.imm & 31), tracker.get_twine(instr.rd)));
 		break;
 
 	case Op::SLLV:
@@ -2320,6 +2399,23 @@ void MIPS::create_syscall(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	Value *values[] = { argument, ConstantInt::get(Type::getInt32Ty(ctx), addr), ConstantInt::get(Type::getInt32Ty(ctx), code) };
 	builder.CreateCall(calls.op_syscall, values);
+}
+
+void MIPS::call_step(Recompiler *recompiler, Value *argument, BasicBlock *bb)
+{
+	IRBuilder<> builder(bb);
+	auto &ctx = builder.getContext();
+
+	if (!calls.step)
+	{
+		Type *load_types[] = { Type::getInt32PtrTy(ctx) };
+		auto *load_type = FunctionType::get(Type::getVoidTy(ctx), load_types, false);
+		calls.step = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
+		                                    "__recompiler_step", recompiler->get_current_module());
+	}
+
+	Value *values[] = { argument };
+	builder.CreateCall(calls.step, values);
 }
 
 template <typename Call>

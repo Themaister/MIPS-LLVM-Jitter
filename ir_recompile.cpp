@@ -61,7 +61,7 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 		address_to_basic_block[order->block.block_start] = block;
 	}
 
-	llvm::BranchInst::Create(basic_blocks.front(), entry_bb);
+	llvm::BranchInst::Create(address_to_basic_block[function.get_entry_address()], entry_bb);
 
 	size_t count = visit_order.size();
 	for (size_t i = 0; i < count; i++)

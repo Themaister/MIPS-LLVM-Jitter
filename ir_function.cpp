@@ -27,6 +27,7 @@ void Function::reset()
 void Function::analyze_from_entry(Address addr)
 {
 	fprintf(stderr, "Analyze from entry 0x%x:\n", addr);
+	entry_addr = addr;
 	reset();
 	analyze_from_entry_inner(addr);
 	for (auto *block : leaf_blocks)

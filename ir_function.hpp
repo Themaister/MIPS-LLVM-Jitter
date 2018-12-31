@@ -48,6 +48,11 @@ public:
 	void set_backend(BlockAnalysisBackend *backend);
 	void analyze_from_entry(Address addr); // Map out all static execution paths from an address.
 
+	Address get_entry_address() const
+	{
+		return entry_addr;
+	}
+
 	const std::vector<BlockMeta *> &get_visit_order() const
 	{
 		return visit_order;
@@ -58,6 +63,7 @@ private:
 	std::unordered_map<Address, std::unique_ptr<BlockMeta>> block_map;
 	std::vector<BlockMeta *> leaf_blocks;
 	std::vector<BlockMeta *> visit_order;
+	Address entry_addr = 0;
 
 	BlockMeta *analyze_from_entry_inner(Address addr); // Map out all static execution paths from an address.
 	void resolve_block(BlockMeta *meta);
