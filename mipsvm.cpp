@@ -11,6 +11,7 @@
 #include "ir_function.hpp"
 #include "ir_recompile.hpp"
 #include "jitter.hpp"
+#include <sys/uio.h>
 
 using namespace JITTIR;
 using namespace llvm;
@@ -48,6 +49,11 @@ enum Syscalls
 	SYSCALL_WAITPID = 7,
 	SYSCALL_CREAT = 8,
 	SYSCALL_LINK = 9,
+	SYSCALL_IOCTL = 54,
+	SYSCALL_WRITEV = 146,
+	SYSCALL_EXIT_GROUP = 246,
+	SYSCALL_SET_TID_ADDRESS = 252,
+	SYSCALL_SET_THREAD_AREA = 283,
 	SYSCALL_COUNT
 };
 
@@ -1054,6 +1060,8 @@ private:
 	SyscallPtr syscall_table[SYSCALL_COUNT] = {};
 	void syscall_exit();
 	void syscall_write();
+	void syscall_writev();
+	void syscall_unimplemented();
 	void syscall_read();
 
 	RegisterState old_state = {};
@@ -1168,7 +1176,12 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_swr", backend_swr);
 
 	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
+	syscall_table[SYSCALL_EXIT_GROUP] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_WRITE] = &MIPS::syscall_write;
+	syscall_table[SYSCALL_WRITEV] = &MIPS::syscall_writev;
+	syscall_table[SYSCALL_IOCTL] = &MIPS::syscall_unimplemented;
+	syscall_table[SYSCALL_SET_THREAD_AREA] = &MIPS::syscall_unimplemented;
+	syscall_table[SYSCALL_SET_TID_ADDRESS] = &MIPS::syscall_unimplemented;
 	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
 }
 
@@ -1351,13 +1364,16 @@ void MIPS::op_syscall(Address addr, uint32_t) noexcept
 {
 	// Syscall
 	// On Linux, syscall number is encoded in $v0.
-	unsigned syscall = scalar_registers[REG_V0];
-	fprintf(stderr, "SYSCALL %u called!\n", syscall);
+	auto syscall = unsigned(scalar_registers[REG_V0]);
+	//fprintf(stderr, "SYSCALL %u called!\n", syscall);
 	syscall -= 4000;
 	if (syscall < SYSCALL_COUNT && syscall_table[syscall])
 		(this->*syscall_table[syscall])();
 	else
-		scalar_registers[REG_V0] = -1;
+	{
+		fprintf(stderr, "Unimplemented SYSCALL %u called!\n", syscall + 4000);
+		std::abort();
+	}
 }
 
 void MIPS::syscall_exit()
@@ -1376,7 +1392,35 @@ void MIPS::syscall_write()
 	for (uint32_t i = 0; i < count; i++)
 		output.push_back(load8(addr + i));
 
-	scalar_registers[REG_A0] = write(fd, output.data(), count);
+	scalar_registers[REG_V0] = write(fd, output.data(), count);
+}
+
+void MIPS::syscall_unimplemented()
+{
+	scalar_registers[REG_V0] = 0;
+}
+
+void MIPS::syscall_writev()
+{
+	int fd = scalar_registers[REG_A0];
+	Address addr = scalar_registers[REG_A1];
+	uint32_t count = scalar_registers[REG_A2];
+
+	std::vector<iovec> iov(count);
+	std::vector<std::vector<uint8_t>> buffers(count);
+	for (uint32_t i = 0; i < count; i++)
+	{
+		uint32_t iov_base = load32(addr + 8 * i + 0);
+		uint32_t iov_len = load32(addr + 8 * i + 4);
+		buffers[i].resize(iov_len);
+		for (uint32_t j = 0; j < iov_len; j++)
+			buffers[i][j] = load8(iov_base + j);
+
+		iov[i].iov_base = buffers[i].data();
+		iov[i].iov_len = iov_len;
+	}
+
+	scalar_registers[REG_V0] = writev(fd, iov.data(), count);
 }
 
 void MIPS::syscall_read()
@@ -1388,7 +1432,7 @@ void MIPS::syscall_read()
 	ssize_t ret = ::read(fd, output.data(), count);
 	for (ssize_t i = 0; i < ret; i++)
 		store8(addr + i, output[i]);
-	scalar_registers[REG_A0] = ret;
+	scalar_registers[REG_V0] = ret;
 }
 
 MIPS::ExitState MIPS::enter(Address addr) noexcept
@@ -1417,7 +1461,7 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 
 StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 {
-	fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
+	//fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
 	{
 		exit_pc = addr;
@@ -1431,12 +1475,12 @@ StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 
 StubCallPtr MIPS::jump_addr(Address addr) noexcept
 {
-	fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
+	//fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
 	if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
 	{
-		fprintf(stderr, "  Successfully predicted return.\n");
-		stack_depth--;
+		//fprintf(stderr, "  Successfully predicted return.\n");
 		return_stack_count--;
+		stack_depth = return_stack_count;
 		return nullptr;
 	}
 	else if (addr == 0)
@@ -1446,7 +1490,7 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 	}
 	else
 	{
-		fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
+		//fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
 		stack_depth++;
 		if (stack_depth > 2048)
 		{
@@ -2546,5 +2590,5 @@ int main(int argc, char **argv)
 	mips.scalar_registers[REG_SP] = symbol_table.find("__recompiler_stack")->second + 64 * 1024 - 16;
 
 	mips.enter(ehdr.e_entry);
-	return 0;
+	std::terminate(); // Should never happen.
 }
