@@ -23,7 +23,7 @@ struct RegisterState
 {
 	enum { MaxIntegerRegisters = 64, MaxFloatRegisters = 64 };
 	int32_t scalar_registers[MaxIntegerRegisters] = {};
-	float float_registers[MaxFloatRegisters] = {};
+	int32_t float_registers[MaxFloatRegisters] = {}; // Stored as raw 32-bit, rely on bitcast as needed.
 };
 
 class Recompiler

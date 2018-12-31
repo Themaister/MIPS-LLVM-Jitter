@@ -15,9 +15,9 @@
 using namespace JITTIR;
 using namespace llvm;
 
-#define LS_DEBUG
-
+//#define LS_DEBUG
 #define STEP_DEBUG
+
 #ifdef STEP_DEBUG
 #define STEP() do { \
 	tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr)); \
@@ -176,14 +176,14 @@ struct RegisterTracker
 		if (float_registers[index])
 			return float_registers[index];
 
-		auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index, std::string("Reg") + std::to_string(index) + "Ptr");
-		float_registers[index] = builder->CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
+		auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index + RegisterState::MaxIntegerRegisters, std::string("FReg") + std::to_string(index) + "Ptr");
+		float_registers[index] = builder->CreateLoad(ptr, std::string("FReg") + std::to_string(index) + "Loaded");
 		return float_registers[index];
 	}
 
 	void flush()
 	{
-		for (int i = 0; i < REG_COUNT; i++)
+		for (int i = 0; i < RegisterState::MaxIntegerRegisters; i++)
 		{
 			if (dirty_int & (1ull << i))
 			{
@@ -191,6 +191,16 @@ struct RegisterTracker
 				builder->CreateStore(int_registers[i], ptr);
 			}
 		}
+
+		for (int i = 0; i < RegisterState::MaxFloatRegisters; i++)
+		{
+			if (dirty_float & (1ull << i))
+			{
+				auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, i + RegisterState::MaxIntegerRegisters, std::string("FReg") + std::to_string(i) + "Ptr");
+				builder->CreateStore(float_registers[i], ptr);
+			}
+		}
+
 		dirty_int = 0;
 		dirty_float = 0;
 	}
@@ -204,6 +214,11 @@ struct RegisterTracker
 	std::string get_twine(unsigned index)
 	{
 		return std::string("Reg") + std::to_string(index) + "_";
+	}
+
+	std::string get_float_twine(unsigned index)
+	{
+		return std::string("FReg") + std::to_string(index) + "_";
 	}
 
 	IRBuilder<> *builder = nullptr;
@@ -495,13 +510,13 @@ enum class Op
 	SW,
 	SWR,
 
+	LWC1,
+	SWC1,
 #if 0
 	LWC0,
-	LWC1,
 	LWC2,
 	LWC3,
 	SWC0,
-	SWC1,
 	SWC2,
 	SWC3,
 	COP0,
@@ -701,7 +716,6 @@ static MIPSInstruction decode_mips_instruction(Address pc, uint32_t word)
 	}
 
 	case 1:
-		instr.rs = rs;
 		instr.imm = (pc + 4) + 4 * int16_t(imm16);
 		switch (rt)
 		{
@@ -907,6 +921,16 @@ static MIPSInstruction decode_mips_instruction(Address pc, uint32_t word)
 
 	case 0x2e:
 		instr.op = Op::SWR;
+		instr.imm = imm16;
+		break;
+
+	case 0x39:
+		instr.op = Op::SWC1;
+		instr.imm = imm16;
+		break;
+
+	case 0x31:
+		instr.op = Op::LWC1;
 		instr.imm = imm16;
 		break;
 	}
@@ -1251,9 +1275,10 @@ void MIPS::swr(Address addr, uint32_t value) noexcept
 
 void MIPS::step() noexcept
 {
+	auto instr = load_instr(scalar_registers[REG_PC]);
 	fprintf(stderr, "Executing PC 0x%x:\n", scalar_registers[REG_PC]);
-	for (int i = 0; i < REG_COUNT; i++)
-		fprintf(stderr, "   [%s] = 0x%x (%d)\n", register_names[i], scalar_registers[i], scalar_registers[i]);
+	//for (int i = 0; i < REG_COUNT; i++)
+	//	fprintf(stderr, "   [%s] = 0x%x (%d)\n", register_names[i], scalar_registers[i], scalar_registers[i]);
 }
 
 uint32_t MIPS::load32(Address addr) const noexcept
@@ -1288,16 +1313,13 @@ void MIPS::op_break(Address addr, uint32_t) noexcept
 	longjmp(jump_buffer, static_cast<int>(ExitCondition::ExitBreak));
 }
 
-void MIPS::op_syscall(Address addr, uint32_t code) noexcept
+void MIPS::op_syscall(Address addr, uint32_t) noexcept
 {
-	// On Linux, syscall number is encoded in $v0.
-	code = scalar_registers[REG_V0];
-
-	fprintf(stderr, "SYSCALL %u called!\n", code);
-
-	code -= 4000; // O32 API.
 	// Syscall
-	unsigned syscall = code;
+	// On Linux, syscall number is encoded in $v0.
+	unsigned syscall = scalar_registers[REG_V0];
+	fprintf(stderr, "SYSCALL %u called!\n", syscall);
+	syscall -= 4000;
 	if (syscall < SYSCALL_COUNT && syscall_table[syscall])
 		(this->*syscall_table[syscall])();
 	else
@@ -2004,7 +2026,6 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWAddr"));
 		builder.SetInsertPoint(bb);
-		loaded = builder.CreateSExt(loaded, Type::getInt32Ty(ctx), tracker.get_twine(instr.rt));
 		tracker.write_int(instr.rt, loaded);
 		break;
 	}
@@ -2097,6 +2118,32 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		           builder.CreateAdd(tracker.read_int(instr.rs),
 		                             ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWRAddr"),
 		           tracker.read_int(instr.rt));
+		break;
+	}
+
+	case Op::LWC1:
+	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
+		auto *loaded = create_load32(recompiler, tracker.get_argument(), bb,
+		                             builder.CreateAdd(tracker.read_int(instr.rs),
+		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWC1Addr"));
+		tracker.write_float(instr.rt, loaded);
+		break;
+	}
+
+	case Op::SWC1:
+	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
+		create_store32(recompiler, tracker.get_argument(), bb,
+		               builder.CreateAdd(tracker.read_int(instr.rs),
+		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
+		               tracker.read_float(instr.rt));
 		break;
 	}
 
