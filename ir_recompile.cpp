@@ -52,12 +52,16 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 	basic_blocks.reserve(visit_order.size());
 	address_to_basic_block.clear();
 
+	auto *entry_bb = llvm::BasicBlock::Create(ctx, "entry", func);
+
 	for (auto &order : visit_order)
 	{
 		auto *block = llvm::BasicBlock::Create(ctx, to_string(order->block.block_start), func);
 		basic_blocks.push_back(block);
 		address_to_basic_block[order->block.block_start] = block;
 	}
+
+	llvm::BranchInst::Create(basic_blocks.front(), entry_bb);
 
 	size_t count = visit_order.size();
 	for (size_t i = 0; i < count; i++)

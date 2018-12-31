@@ -26,6 +26,7 @@ void Function::reset()
 
 void Function::analyze_from_entry(Address addr)
 {
+	fprintf(stderr, "Analyze from entry 0x%x:\n", addr);
 	reset();
 	analyze_from_entry_inner(addr);
 	for (auto *block : leaf_blocks)
@@ -49,6 +50,8 @@ BlockMeta *Function::analyze_from_entry_inner(Address addr)
 	auto itr = block_map.find(addr);
 	if (itr != end(block_map))
 		return itr->second.get();
+
+	fprintf(stderr, "  Adding basic block 0x%x\n", addr);
 
 	auto meta_ = make_unique<BlockMeta>();
 	auto *meta = meta_.get();

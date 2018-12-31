@@ -15,6 +15,8 @@
 using namespace JITTIR;
 using namespace llvm;
 
+#define LS_DEBUG
+
 enum Syscalls
 {
 	SYSCALL_EXIT = 0,
@@ -60,6 +62,7 @@ enum Registers
 
 	REG_LO,
 	REG_HI,
+	REG_PC,
 	REG_COUNT
 };
 
@@ -375,6 +378,7 @@ static uint8_t backend_load8(RegisterState *regs, Address addr);
 enum class Op
 {
 	Invalid,
+	NOP,
 	SLL,
 	SRL,
 	SRA,
@@ -457,7 +461,7 @@ struct MIPSInstruction
 	uint32_t imm;
 };
 
-static MIPSInstruction decode_mips_instruction(uint32_t word)
+static MIPSInstruction decode_mips_instruction(Address pc, uint32_t word)
 {
 	MIPSInstruction instr = {};
 	instr.op = Op::Invalid;
@@ -482,28 +486,40 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 		case 0:
 			instr.op = Op::SLL;
 			instr.imm = shamt;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 2:
 			instr.op = Op::SRL;
 			instr.imm = shamt;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 3:
 			instr.op = Op::SRA;
 			instr.imm = shamt;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 4:
 			instr.op = Op::SLLV;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 6:
 			instr.op = Op::SRLV;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 7:
 			instr.op = Op::SRAV;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 8:
@@ -534,10 +550,14 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 
 		case 0x12:
 			instr.op = Op::MFLO;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x13:
 			instr.op = Op::MTLO;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x18:
@@ -558,42 +578,62 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 
 		case 0x20:
 			instr.op = Op::ADD;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x21:
 			instr.op = Op::ADDU;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x22:
 			instr.op = Op::SUB;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x23:
 			instr.op = Op::SUBU;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x24:
 			instr.op = Op::AND;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x25:
 			instr.op = Op::OR;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x26:
 			instr.op = Op::XOR;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x27:
 			instr.op = Op::NOR;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x28:
 			instr.op = Op::SLT;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		case 0x29:
 			instr.op = Op::SLTU;
+			if (instr.rd == 0)
+				instr.op = Op::NOP;
 			break;
 
 		default:
@@ -605,23 +645,35 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 
 	case 1:
 		instr.rs = rs;
-		instr.imm = imm16;
+		instr.imm = (pc + 4) + 4 * int16_t(imm16);
 		switch (rt)
 		{
 		case 0:
-			instr.op = Op::BLTZ;
+			if (rs == 0)
+				instr.op = Op::NOP;
+			else
+				instr.op = Op::BLTZ;
 			break;
 
 		case 1:
-			instr.op = Op::BGEZ;
+			if (rs == 0)
+				instr.op = Op::J;
+			else
+				instr.op = Op::BGEZ;
 			break;
 
 		case 16:
-			instr.op = Op::BLTZAL;
+			if (rs == 0)
+				instr.op = Op::NOP;
+			else
+				instr.op = Op::BLTZAL;
 			break;
 
 		case 17:
-			instr.op = Op::BGEZAL;
+			if (rs == 0)
+				instr.op = Op::JAL;
+			else
+				instr.op = Op::BGEZAL;
 			break;
 
 		default:
@@ -630,108 +682,150 @@ static MIPSInstruction decode_mips_instruction(uint32_t word)
 		break;
 
 	case 2:
-		instr.imm = imm26;
+		instr.imm = ((pc + 4) & 0xf0000000) + 4 * imm26;
 		instr.op = Op::J;
 		break;
 
 	case 3:
-		instr.imm = imm26;
+		instr.imm = ((pc + 4) & 0xf0000000) + 4 * imm26;
 		instr.op = Op::JAL;
 		break;
 
 	case 4:
-		instr.op = Op::BEQ;
-		instr.imm = imm16;
+		instr.imm = (pc + 4) + 4 * int16_t(imm16);
+		if (instr.rs == instr.rt)
+			instr.op = Op::J;
+		else
+			instr.op = Op::BEQ;
 		break;
 
 	case 5:
-		instr.op = Op::BNE;
-		instr.imm = imm16;
+		instr.imm = (pc + 4) + 4 * int16_t(imm16);
+		if (instr.rs == instr.rt)
+			instr.op = Op::NOP;
+		else
+			instr.op = Op::BNE;
 		break;
 
 	case 6:
-		instr.op = Op::BLEZ;
-		instr.imm = imm16;
+		instr.imm = (pc + 4) + 4 * int16_t(imm16);
+		if (instr.rs == 0)
+			instr.op = Op::J;
+		else
+			instr.op = Op::BLEZ;
 		break;
 
 	case 7:
-		instr.op = Op::BGTZ;
-		instr.imm = imm16;
+		instr.imm = (pc + 4) + 4 * int16_t(imm16);
+		if (instr.rs == 0)
+			instr.op = Op::NOP;
+		else
+			instr.op = Op::BGTZ;
 		break;
 
 	case 8:
 		instr.op = Op::ADDI;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 9:
 		instr.op = Op::ADDIU;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0xa:
 		instr.op = Op::SLTI;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0xb:
 		instr.op = Op::SLTIU;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0xc:
 		instr.op = Op::ANDI;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0xd:
 		instr.op = Op::ORI;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0xe:
 		instr.op = Op::XORI;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0xf:
 		instr.op = Op::LUI;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x20:
 		instr.op = Op::LB;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x21:
 		instr.op = Op::LH;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x22:
 		instr.op = Op::LWL;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x23:
 		instr.op = Op::LW;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x24:
 		instr.op = Op::LBU;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x25:
 		instr.op = Op::LHU;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x26:
 		instr.op = Op::LWR;
 		instr.imm = imm16;
+		if (instr.rt == 0)
+			instr.op = Op::NOP;
 		break;
 
 	case 0x28:
@@ -984,7 +1078,7 @@ MIPSInstruction MIPS::load_instr(Address addr)
 		instr.op = Op::Invalid; // Should be a segfault meta-op.
 		return instr;
 	}
-	return decode_mips_instruction(ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 2]);
+	return decode_mips_instruction(addr, ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 2]);
 }
 
 void MIPS::store32(Address addr, uint32_t value) noexcept
@@ -1266,6 +1360,8 @@ static bool mips_opcode_is_branch(Op op)
 	case Op::BNE:
 	case Op::BLEZ:
 	case Op::BGTZ:
+	case Op::BLTZ:
+	case Op::BGEZ:
 	case Op::BLTZAL:
 	case Op::BGEZAL:
 		return true;
@@ -1285,6 +1381,8 @@ static bool mips_opcode_ends_basic_block(Op op)
 	case Op::BNE:
 	case Op::BLEZ:
 	case Op::BGTZ:
+	case Op::BLTZ:
+	case Op::BGEZ:
 	case Op::BREAK:
 	case Op::Invalid:
 		return true;
@@ -1314,7 +1412,7 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 			{
 			case Op::J:
 				block.terminator = Terminator::DirectBranch;
-				block.static_address_targets[0] = ((addr + 4) & 0xf0000000u) + instruction.imm * 4;
+				block.static_address_targets[0] = instruction.imm;
 				break;
 
 			case Op::JR:
@@ -1325,10 +1423,12 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 
 			case Op::BLTZ:
 			case Op::BGEZ:
+			case Op::BLEZ:
+			case Op::BGTZ:
 			case Op::BEQ:
 			case Op::BNE:
 				block.terminator = Terminator::SelectionBranch;
-				block.static_address_targets[0] = (addr + 4) + int16_t(instruction.imm) * 4;
+				block.static_address_targets[0] = instruction.imm;
 				block.static_address_targets[1] = addr + 8;
 				break;
 
@@ -1350,6 +1450,9 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	auto instr = load_instr(addr);
 	switch (instr.op)
 	{
+	case Op::NOP:
+		break;
+
 	// Arithmetic operations.
 	case Op::ADD:
 	case Op::ADDU:
@@ -1534,7 +1637,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::JAL:
 	{
-		Address target = ((addr + 4) & 0xf0000000u) + instr.imm * 4;
+		Address target = instr.imm;
 		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
@@ -1601,7 +1704,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.SetInsertPoint(bb);
 		tracker.flush();
 		auto *cmp = builder.CreateICmpEQ(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BEQ");
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
 		                   cmp,
@@ -1616,7 +1719,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.SetInsertPoint(bb);
 		tracker.flush();
 		auto *cmp = builder.CreateICmpNE(tracker.read_int(instr.rs), tracker.read_int(instr.rt), "BNE");
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
 		                   cmp,
@@ -1631,7 +1734,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.SetInsertPoint(bb);
 		tracker.flush();
 		auto *cmp = builder.CreateICmpSLT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLTZ");
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
 		                   cmp,
@@ -1646,7 +1749,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.SetInsertPoint(bb);
 		tracker.flush();
 		auto *cmp = builder.CreateICmpSGE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGEZ");
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
 		                   cmp,
@@ -1661,7 +1764,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.SetInsertPoint(bb);
 		tracker.flush();
 		auto *cmp = builder.CreateICmpSGT(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BGTZ");
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
 		                   cmp,
@@ -1676,7 +1779,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.SetInsertPoint(bb);
 		tracker.flush();
 		auto *cmp = builder.CreateICmpSLE(tracker.read_int(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0), "BLEZ");
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		BranchInst::Create(recompiler->get_block_for_address(target),
 		                   recompiler->get_block_for_address(addr + 8),
 		                   cmp,
@@ -1686,7 +1789,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BLTZAL:
 	{
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
@@ -1710,7 +1813,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::BGEZAL:
 	{
-		Address target = addr + 4 + int16_t(instr.imm) * 4;
+		Address target = instr.imm;
 		tracker.write_int(REG_RA, ConstantInt::get(Type::getInt32Ty(ctx), addr + 8));
 
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
@@ -1751,6 +1854,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LB:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_load8(recompiler, tracker.get_argument(), bb,
 		                            builder.CreateAdd(tracker.read_int(instr.rs),
 		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LBAddr"));
@@ -1762,6 +1869,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LH:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_load16(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LHAddr"));
@@ -1773,6 +1884,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LBU:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_load8(recompiler, tracker.get_argument(), bb,
 		                            builder.CreateAdd(tracker.read_int(instr.rs),
 		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LBAddr"));
@@ -1784,6 +1899,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LHU:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_load16(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LHAddr"));
@@ -1795,6 +1914,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LW:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_load32(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWAddr"));
@@ -1806,6 +1929,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SB:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		create_store8(recompiler, tracker.get_argument(), bb,
 		              builder.CreateAdd(tracker.read_int(instr.rs),
 		                                ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SBAddr"),
@@ -1815,6 +1942,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SH:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		create_store16(recompiler, tracker.get_argument(), bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SHAddr"),
@@ -1824,6 +1955,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SW:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		create_store32(recompiler, tracker.get_argument(), bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
@@ -1833,6 +1968,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LWL:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_lwl(recompiler, tracker.get_argument(), bb, tracker.read_int(instr.rt),
 		                          builder.CreateAdd(tracker.read_int(instr.rs),
 		                                            ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWLAddr"));
@@ -1842,6 +1981,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LWR:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		auto *loaded = create_lwr(recompiler, tracker.get_argument(), bb, tracker.read_int(instr.rt),
 		                          builder.CreateAdd(tracker.read_int(instr.rs),
 		                                            ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "LWRAddr"));
@@ -1851,6 +1994,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SWL:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		create_swl(recompiler, tracker.get_argument(), bb,
 		           builder.CreateAdd(tracker.read_int(instr.rs),
 		                             ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWLAddr"),
@@ -1860,6 +2007,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SWR:
 	{
+#ifdef LS_DEBUG
+		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+		tracker.flush();
+#endif
 		create_swr(recompiler, tracker.get_argument(), bb,
 		           builder.CreateAdd(tracker.read_int(instr.rs),
 		                             ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWRAddr"),
@@ -2181,22 +2332,6 @@ static void call_int(MIPS &mips, const std::unordered_map<std::string, Address> 
 	call(mips.scalar_registers[REG_V0], mips.scalar_registers[REG_V1]);
 }
 
-static void assert_equal(int64_t v0, int64_t v1)
-{
-	if (v0 != v1)
-		std::abort();
-}
-
-static int64_t create_int64(int32_t v0, int32_t v1)
-{
-	return (int64_t(v1) << 32) | uint32_t(v0);
-}
-
-static uint64_t create_uint64(int32_t v0, int32_t v1)
-{
-	return (uint64_t(v1) << 32) | uint32_t(v0);
-}
-
 int main(int argc, char **argv)
 {
 	MIPS mips;
@@ -2205,47 +2340,8 @@ int main(int argc, char **argv)
 	if (!load_elf(argv[1], ehdr, mips.get_address_space(), symbol_table))
 		return 1;
 
-	auto stack = symbol_table.find("__stack")->second;
-	for (unsigned i = 0; i < 16; i++)
-		mips.store8(stack + i, i);
-
-	mips.scalar_registers[REG_SP] = stack + 64 * 1024;
-
-	call_int(mips, symbol_table, "call_test", 20, 20, [](int32_t v0, int32_t) { assert_equal(v0, 40); });
-	call_int(mips, symbol_table, "call_test", 30, 20, [](int32_t v0, int32_t) { assert_equal(v0, 30); });
-
-	call_int(mips, symbol_table, "test_ulw_emu", stack, 0, [](int32_t v0, int32_t) { assert_equal(v0, (0 << 0) | (1 << 8) | (2 << 16) | (3 << 24)); });
-	call_int(mips, symbol_table, "test_ulw_emu", stack, 1, [](int32_t v0, int32_t) { assert_equal(v0, (1 << 0) | (2 << 8) | (3 << 16) | (4 << 24)); });
-	call_int(mips, symbol_table, "test_ulw_emu", stack, 2, [](int32_t v0, int32_t) { assert_equal(v0, (2 << 0) | (3 << 8) | (4 << 16) | (5 << 24)); });
-	call_int(mips, symbol_table, "test_ulw_emu", stack, 3, [](int32_t v0, int32_t) { assert_equal(v0, (3 << 0) | (4 << 8) | (5 << 16) | (6 << 24)); });
-
-	call_int(mips, symbol_table, "test_ulw", stack, 0, [](int32_t v0, int32_t) { assert_equal(v0, (0 << 0) | (1 << 8) | (2 << 16) | (3 << 24)); });
-	call_int(mips, symbol_table, "test_ulw", stack, 1, [](int32_t v0, int32_t) { assert_equal(v0, (1 << 0) | (2 << 8) | (3 << 16) | (4 << 24)); });
-	call_int(mips, symbol_table, "test_ulw", stack, 2, [](int32_t v0, int32_t) { assert_equal(v0, (2 << 0) | (3 << 8) | (4 << 16) | (5 << 24)); });
-	call_int(mips, symbol_table, "test_ulw", stack, 3, [](int32_t v0, int32_t) { assert_equal(v0, (3 << 0) | (4 << 8) | (5 << 16) | (6 << 24)); });
-
-	call_int(mips, symbol_table, "test_usw", stack, 0xabcd1234, [](int32_t, int32_t) {});
-	call_int(mips, symbol_table, "test_ulw", stack, 0, [](uint32_t v0, int32_t) { assert_equal(v0, 0xabcd1234ll); });
-	call_int(mips, symbol_table, "test_usw", stack + 1, 0xabcd1234, [](int32_t, int32_t) {});
-	call_int(mips, symbol_table, "test_ulw", stack, 1, [](uint32_t v0, int32_t) { assert_equal(v0, 0xabcd1234ll); });
-	call_int(mips, symbol_table, "test_usw", stack + 2, 0xabcd1234, [](int32_t, int32_t) {});
-	call_int(mips, symbol_table, "test_ulw", stack, 2, [](uint32_t v0, int32_t) { assert_equal(v0, 0xabcd1234ll); });
-	call_int(mips, symbol_table, "test_usw", stack + 3, 0xabcd1234, [](int32_t, int32_t) {});
-	call_int(mips, symbol_table, "test_ulw", stack, 3, [](uint32_t v0, int32_t) { assert_equal(v0, 0xabcd1234ll); });
-
-	call_int(mips, symbol_table, "test_div", 2, 4, [](int32_t v0, int32_t v1) { assert_equal(v0, 0); assert_equal(v1, 2); });
-	call_int(mips, symbol_table, "test_div", -7, 3, [](int32_t v0, int32_t v1) { assert_equal(v0, -7 / 3); assert_equal(v1, -7 % 3); });
-
-	call_int(mips, symbol_table, "test_add", 50, 150, [](int32_t v0, int32_t v1) { assert_equal(v0, 200); });
-
-	call_int(mips, symbol_table, "test_mult", -2, 4, [](int32_t v0, int32_t v1) { assert_equal(create_int64(v0, v1), -8); });
-	call_int(mips, symbol_table, "test_mult", -2, -4, [](int32_t v0, int32_t v1) { assert_equal(create_int64(v0, v1), 8); });
-	call_int(mips, symbol_table, "test_mult", -100000000, -200000000, [](int32_t v0, int32_t v1) { assert_equal(create_int64(v0, v1), int64_t(-100000000) * int64_t(-200000000)); });
-
-	call_int(mips, symbol_table, "test_multu", 2, 4, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), 8); });
-	call_int(mips, symbol_table, "test_multu", 0xff000000u, 0xfff00000u, [](int32_t v0, int32_t v1) { assert_equal(create_uint64(v0, v1), uint64_t(0xff000000u) * uint64_t(0xfff00000u)); });
+	mips.scalar_registers[REG_SP] = symbol_table.find("__recompiler_stack")->second + 64 * 1024 - 16;
 
 	mips.enter(ehdr.e_entry);
-
 	return 0;
 }
