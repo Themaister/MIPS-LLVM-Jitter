@@ -42,7 +42,8 @@ class Function
 {
 public:
 	void set_backend(BlockAnalysisBackend *backend);
-	void analyze_from_entry(Address addr); // Map out all static execution paths from an address.
+	void analyze_from_entry(); // Map out all static execution paths from an address.
+	void set_entry_address(Address addr);
 
 	Address get_entry_address() const
 	{

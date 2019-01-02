@@ -991,6 +991,7 @@ public:
 	void op_break(Address addr, uint32_t code) noexcept;
 	void op_syscall(Address addr, uint32_t code) noexcept;
 	StubCallPtr call_addr(Address addr, Address expected_addr) noexcept;
+	void predict_return(Address addr, Address expected_addr) noexcept;
 	StubCallPtr jump_addr(Address addr) noexcept;
 
 private:
@@ -1003,13 +1004,13 @@ private:
 		Recompiler *recompiler, const Block &block, BasicBlock *bb, Value *args) override;
 
 	Jitter jitter;
-	std::unordered_map<Address, JITTIR::Recompiler::Result> blocks;
 	jmp_buf jump_buffer;
 	Address return_stack[1024];
 	unsigned return_stack_count = 0;
 	unsigned stack_depth = 0;
 	Address exit_pc = 0;
 
+	std::unordered_map<Address, void (*)(RegisterState *)> blocks;
 	StubCallPtr call(Address addr) noexcept;
 	MIPSInstruction load_instr(Address addr);
 	void recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
@@ -1048,6 +1049,7 @@ private:
 		llvm::Function *load16 = nullptr;
 		llvm::Function *load8 = nullptr;
 		llvm::Function *call = nullptr;
+		llvm::Function *predict_return = nullptr;
 		llvm::Function *jump_indirect = nullptr;
 		llvm::Function *sigill = nullptr;
 		llvm::Function *op_break = nullptr;
@@ -1072,6 +1074,11 @@ extern "C"
 static StubCallPtr backend_call_addr(RegisterState *regs, Address addr, Address expected_addr)
 {
 	return static_cast<MIPS *>(regs)->call_addr(addr, expected_addr);
+}
+
+static void backend_predict_return(RegisterState *regs, Address addr, Address expected_addr)
+{
+	static_cast<MIPS *>(regs)->predict_return(addr, expected_addr);
 }
 
 static StubCallPtr backend_jump_addr(RegisterState *regs, Address addr)
@@ -1153,11 +1160,13 @@ static void backend_step_after(RegisterState *regs)
 {
 	static_cast<MIPS *>(regs)->step_after();
 }
+
 }
 
 MIPS::MIPS()
 {
 	jitter.add_external_symbol("__recompiler_call_addr", backend_call_addr);
+	jitter.add_external_symbol("__recompiler_predict_return", backend_predict_return);
 	jitter.add_external_symbol("__recompiler_jump_indirect", backend_jump_addr);
 	jitter.add_external_symbol("__recompiler_store32", backend_store32);
 	jitter.add_external_symbol("__recompiler_store16", backend_store16);
@@ -1459,7 +1468,7 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 	return state;
 }
 
-StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
+void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 {
 	//fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
@@ -1470,6 +1479,11 @@ StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 
 	return_stack[return_stack_count++] = expected_addr;
 	stack_depth++;
+}
+
+StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
+{
+	predict_return(addr, expected_addr);
 	return call(addr);
 }
 
@@ -1485,6 +1499,7 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 	}
 	else if (addr == 0)
 	{
+		// Useful for cases where we want to test arbitrary functions and just want it to return to host.
 		exit_pc = addr;
 		longjmp(jump_buffer, static_cast<int>(ExitCondition::JumpToZero));
 	}
@@ -1506,21 +1521,20 @@ StubCallPtr MIPS::call(Address addr) noexcept
 	auto itr = blocks.find(addr);
 	if (itr != end(blocks))
 	{
-		return itr->second.call;
+		return itr->second;
 	}
 	else
 	{
 		JITTIR::Function func;
-		JITTIR::Recompiler recompiler;
+		JITTIR::Recompiler recompiler(&blocks);
 		calls = {};
 		func.set_backend(this);
 		recompiler.set_backend(this);
 		recompiler.set_jitter(&jitter);
-		func.analyze_from_entry(addr);
+		func.set_entry_address(addr);
 		auto result = recompiler.recompile_function(func);
 		if (!result.call)
 			std::abort();
-		blocks.emplace(addr, result);
 		return result.call;
 	}
 }
@@ -1828,9 +1842,12 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 		tracker.flush();
 		auto *call = create_call(recompiler, tracker.get_argument(), bb, target, addr + 8);
-		Value *values[] = { tracker.get_argument() };
-		builder.SetInsertPoint(bb);
-		builder.CreateCall(call, values);
+		if (call)
+		{
+			Value *values[] = { tracker.get_argument() };
+			builder.SetInsertPoint(bb);
+			builder.CreateCall(call, values);
+		}
 		tracker.invalidate();
 		break;
 	}
@@ -1987,9 +2004,12 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		bb = bb_merge;
 
 		auto *call = create_call(recompiler, tracker.get_argument(), bb_call, target, addr + 8);
-		Value *values[] = { tracker.get_argument() };
-		builder.SetInsertPoint(bb_call);
-		builder.CreateCall(call, values);
+		if (call)
+		{
+			Value *values[] = { tracker.get_argument() };
+			builder.SetInsertPoint(bb_call);
+			builder.CreateCall(call, values);
+		}
 		tracker.invalidate();
 		break;
 	}
@@ -2011,9 +2031,12 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		bb = bb_merge;
 
 		auto *call = create_call(recompiler, tracker.get_argument(), bb_call, target, addr + 8);
-		Value *values[] = { tracker.get_argument() };
-		builder.SetInsertPoint(bb_call);
-		builder.CreateCall(call, values);
+		if (call)
+		{
+			Value *values[] = { tracker.get_argument() };
+			builder.SetInsertPoint(bb_call);
+			builder.CreateCall(call, values);
+		}
 		tracker.invalidate();
 		break;
 	}
@@ -2265,7 +2288,40 @@ Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb
 {
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
+
+#define CALL_AGGRESSIVE_JIT
+#ifdef CALL_AGGRESSIVE_JIT
+	if (!calls.predict_return)
+	{
+		Type *types[] = { Type::getInt32PtrTy(ctx), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
+		auto *function_type = FunctionType::get(Type::getVoidTy(ctx), types, false);
+		calls.predict_return = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+		                                              "__recompiler_predict_return", recompiler->get_current_module());
+
+	}
+
+	Value *values[] = {
+		argument,
+		ConstantInt::get(Type::getInt32Ty(ctx), addr),
+		ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
+	};
+	builder.CreateCall(calls.predict_return, values);
+
+	// Eagerly compile all our call-sites as well, can facilitate inlining! :D
+	JITTIR::Recompiler tmp(&blocks);
+	tmp.set_jitter(&jitter);
+	tmp.set_backend(this);
+	JITTIR::Function tmp_func;
+	tmp_func.set_entry_address(addr);
+	auto result = tmp.recompile_function(tmp_func, recompiler->get_current_module());
+
+	Value *call_values[] = { argument };
+	builder.CreateCall(result.function, call_values);
+	return nullptr;
+#else
+	// Thunk out calls all the time, even when address is static.
 	return create_call(recompiler, argument, bb, ConstantInt::get(Type::getInt32Ty(ctx), addr), expected_return);
+#endif
 }
 
 Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Address expected_return)

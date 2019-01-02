@@ -17,12 +17,15 @@ void Function::reset()
 	visit_order.clear();
 }
 
-void Function::analyze_from_entry(Address addr)
+void Function::set_entry_address(Address addr)
 {
-	//fprintf(stderr, "Analyze from entry 0x%x:\n", addr);
 	entry_addr = addr;
+}
+
+void Function::analyze_from_entry()
+{
 	reset();
-	analyze_from_entry_inner(addr);
+	analyze_from_entry_inner(entry_addr);
 }
 
 BlockMeta *Function::analyze_from_entry_inner(Address addr)

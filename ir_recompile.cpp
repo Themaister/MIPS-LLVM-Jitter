@@ -30,20 +30,57 @@ llvm::Module *Recompiler::get_current_module()
 	return module;
 }
 
-Recompiler::Result Recompiler::recompile_function(const Function &function)
+Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Module *target_module)
 {
-	auto &visit_order = function.get_visit_order();
-
-	auto module = jitter->create_module(to_string(function.get_entry_address()));
-	this->module = module.get();
+	std::unique_ptr<llvm::Module> module_;
+	if (target_module)
+		this->module = target_module;
+	else
+	{
+		module_ = jitter->create_module(to_string(function.get_entry_address()));
+		this->module = module_.get();
+	}
 	auto &ctx = module->getContext();
+	auto entry_symbol = to_string(function.get_entry_address());
+
+	if (target_module)
+	{
+		// Do we have this function already in our module? Just return it.
+		for (auto &f : *target_module)
+		{
+			if (entry_symbol == f.getName())
+			{
+				Recompiler::Result result = {};
+				result.function = &f;
+				return result;
+			}
+		}
+	}
 
 	// Create our function.
 	llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx) };
 	auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
 	auto *func = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
-	                                    to_string(function.get_entry_address()),
-	                                    module.get());
+	                                    entry_symbol,
+	                                    module);
+
+	if (target_module)
+	{
+		// Do we have the block in the JIT cache? Then we can rely on linking.
+		// If we don't do anything, it is declared as an extern void func(); which needs to be linked by Jitter later.
+		auto external_symbol = jitter->find_symbol(entry_symbol);
+		if (external_symbol.getAddress())
+		{
+			Recompiler::Result result = {};
+			result.function = func;
+			return result;
+		}
+	}
+
+	// Lazily analyze.
+	function.analyze_from_entry();
+	auto &visit_order = function.get_visit_order();
+
 	auto *argument = &func->args().begin()[0];
 	this->function = func;
 
@@ -79,8 +116,24 @@ Recompiler::Result Recompiler::recompile_function(const Function &function)
 		return result;
 	}
 
-	result.handle = jitter->add_module(move(module));
-	result.call = (void (*)(RegisterState *))jitter->get_symbol_address(to_string(function.get_entry_address()));
+	// If we are creating a new module, compile and update symbols here.
+	if (module_)
+	{
+		std::vector<std::string> symbols;
+		for (auto &f : *this->module)
+			symbols.push_back(f.getName());
+		result.handle = jitter->add_module(move(module_));
+
+		for (auto &name : symbols)
+		{
+			auto symbol = (void (*)(RegisterState *)) jitter->get_symbol_address(name);
+			blocks->emplace(Address(stoull(name)), symbol);
+		}
+
+		result.call = (void (*)(RegisterState *)) jitter->get_symbol_address(entry_symbol);
+	}
+
+	result.function = func;
 	return result;
 }
 }

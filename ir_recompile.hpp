@@ -36,9 +36,15 @@ public:
 	{
 		Jitter::ModuleHandle handle;
 		void (*call)(RegisterState *);
+		llvm::Function *function;
 	};
 
-	Result recompile_function(const Function &function);
+	explicit Recompiler(std::unordered_map<Address, void (*)(RegisterState *)> *blocks_)
+		: blocks(blocks_)
+	{
+	}
+
+	Result recompile_function(Function &function, llvm::Module *target_module = nullptr);
 	llvm::BasicBlock *get_block_for_address(Address addr);
 	llvm::Function *get_current_function();
 	llvm::Module *get_current_module();
@@ -50,5 +56,7 @@ private:
 
 	llvm::Module *module = nullptr;
 	llvm::Function *function = nullptr;
+
+	std::unordered_map<Address, void (*)(RegisterState *)> *blocks;
 };
 }
