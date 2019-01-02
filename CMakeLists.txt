@@ -49,6 +49,13 @@ endif()
 add_library(jitter STATIC
         jitter.hpp jitter.cpp
         ir_function.hpp ir_function.cpp
+        elf.cpp elf.hpp
+        mips.hpp mips.cpp
+        mips_c_stubs.cpp
+        mips_external_calls.cpp
+        mips_recompile.cpp
+        register_tracker.cpp register_tracker.hpp
+        mips_opcode.hpp mips_opcode.cpp
         ir_recompile.cpp ir_recompile.hpp)
 
 add_executable(mipsvm mipsvm.cpp)
