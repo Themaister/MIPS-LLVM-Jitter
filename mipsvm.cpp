@@ -2626,16 +2626,6 @@ void MIPS::call_step_after(Recompiler *recompiler, Value *argument, BasicBlock *
 	builder.CreateCall(calls.step_after, values);
 }
 
-template <typename Call>
-static void call_int(MIPS &mips, const std::unordered_map<std::string, Address> &symbol_table, const char *sym, int32_t a, int32_t b, const Call &call)
-{
-	mips.scalar_registers[REG_A0] = a;
-	mips.scalar_registers[REG_A1] = b;
-	auto test = symbol_table.find(sym)->second;
-	mips.enter(test);
-	call(mips.scalar_registers[REG_V0], mips.scalar_registers[REG_V1]);
-}
-
 int main(int argc, char **argv)
 {
 	MIPS mips;
