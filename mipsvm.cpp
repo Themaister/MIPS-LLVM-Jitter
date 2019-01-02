@@ -1470,7 +1470,7 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 
 void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 {
-	//fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
+	fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
 	{
 		exit_pc = addr;
@@ -1489,10 +1489,10 @@ StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 
 StubCallPtr MIPS::jump_addr(Address addr) noexcept
 {
-	//fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
+	fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
 	if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
 	{
-		//fprintf(stderr, "  Successfully predicted return.\n");
+		fprintf(stderr, "  Successfully predicted return.\n");
 		return_stack_count--;
 		stack_depth = return_stack_count;
 		return nullptr;
@@ -1505,7 +1505,7 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 	}
 	else
 	{
-		//fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
+		fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
 		stack_depth++;
 		if (stack_depth > 2048)
 		{

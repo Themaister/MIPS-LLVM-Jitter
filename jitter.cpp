@@ -130,7 +130,11 @@ Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
 	for (auto &func : *module)
 		pass_manager.run(func);
 
-	module->print(errs(), nullptr);
+	//std::error_code err;
+	//llvm::raw_fd_ostream ostr("/tmp/llvm.i", err);
+	//module->print(ostr, nullptr);
+
+	//module->print(errs(), nullptr);
 	auto K = execution_session->allocateVModule();
 	auto error = compile_layer->addModule(K, std::move(module));
 	if (error)
