@@ -32,7 +32,7 @@ llvm::Module *Recompiler::get_current_module()
 
 Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Module *target_module)
 {
-	std::unique_ptr<llvm::Module> module_;
+	unique_ptr<llvm::Module> module_;
 	if (target_module)
 		this->module = target_module;
 	else
@@ -41,7 +41,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		this->module = module_.get();
 	}
 	auto &ctx = module->getContext();
-	auto entry_symbol = to_string(function.get_entry_address());
+	auto entry_symbol = string("_") + to_string(function.get_entry_address());
 
 	if (target_module)
 	{
@@ -119,11 +119,11 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 	// If we are creating a new module, compile and update symbols here.
 	if (module_)
 	{
-		std::vector<std::string> symbols;
+		vector<string> symbols;
 		for (auto &f : *this->module)
 		{
 			// Skip any builtin symbols.
-			if (f.getName().front() == '_')
+			if (f.getName().substr(0, 2) == "__")
 				continue;
 			symbols.push_back(f.getName());
 		}
@@ -132,6 +132,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		for (auto &name : symbols)
 		{
 			auto symbol = (void (*)(RegisterState *)) jitter->get_symbol_address(name);
+			name.erase(begin(name));
 			blocks->emplace(Address(stoull(name)), symbol);
 		}
 
