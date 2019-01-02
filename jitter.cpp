@@ -62,7 +62,8 @@ Jitter::Jitter()
 #endif
 	execution_session = std::make_unique<ExecutionSession>();
 	execution_session->setErrorReporter([](Error error) {
-		errs() << "Error: " << error << "\n";
+		if (error)
+			errs() << "Error: " << error << "\n";
 	});
 
 #ifdef JITTER_LLVM_VERSION_LEGACY
