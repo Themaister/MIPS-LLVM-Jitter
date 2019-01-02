@@ -1315,7 +1315,7 @@ void MIPS::swr(Address addr, uint32_t value) noexcept
 
 void MIPS::step() noexcept
 {
-	auto instr = load_instr(scalar_registers[REG_PC]);
+	//auto instr = load_instr(scalar_registers[REG_PC]);
 	fprintf(stderr, "Executing PC 0x%x:\n", scalar_registers[REG_PC]);
 	//for (int i = 0; i < REG_COUNT; i++)
 	//	fprintf(stderr, "   [%s] = 0x%x (%d)\n", register_names[i], scalar_registers[i], scalar_registers[i]);

@@ -3,6 +3,7 @@ mkdir -p llvm
 cd llvm
 
 cmake "$1" \
+	-G "Ninja" \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_INSTALL_PREFIX=output \
 	-DLLVM_TARGETS_TO_BUILD=X86 \

@@ -27,7 +27,7 @@ option(USE_SYSTEM_LLVM "Use system LLVM." ON)
 if (USE_SYSTEM_LLVM)
     find_package(LLVM REQUIRED CONFIG)
 else()
-    find_package(LLVM REQUIRED CONFIG PATHS ${CMAKE_BINARY_DIR}/llvm NO_DEFAULT_PATH)
+    find_package(LLVM REQUIRED CONFIG NO_DEFAULT_PATH)
     if (NOT LLVM_FOUND)
         ExternalProject_Get_Property(llvm INSTALL_DIR)
         set(LLVM_ROOT ${INSTALL_DIR})
@@ -50,10 +50,6 @@ add_library(jitter STATIC
         jitter.hpp jitter.cpp
         ir_function.hpp ir_function.cpp
         ir_recompile.cpp ir_recompile.hpp)
-
-add_executable(jitter-test main.cpp)
-target_link_libraries(jitter-test PRIVATE jitter)
-target_compile_options(jitter-test PRIVATE ${JITTER_CXX_FLAGS})
 
 add_executable(mipsvm mipsvm.cpp)
 target_link_libraries(mipsvm PRIVATE jitter)
