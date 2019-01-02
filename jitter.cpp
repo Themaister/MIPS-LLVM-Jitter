@@ -131,7 +131,7 @@ Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
 		pass_manager.run(func);
 
 	std::error_code err;
-	llvm::raw_fd_ostream ostr("/tmp/llvm.i", err);
+	llvm::raw_fd_ostream ostr(std::string("/tmp/llvm/") + module->getSourceFileName() + ".ll", err);
 	module->print(ostr, nullptr);
 
 	//module->print(errs(), nullptr);
