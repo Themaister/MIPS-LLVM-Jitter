@@ -2313,6 +2313,7 @@ Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb
 	tmp.set_backend(this);
 	JITTIR::Function tmp_func;
 	tmp_func.set_entry_address(addr);
+	tmp_func.set_backend(this);
 	auto result = tmp.recompile_function(tmp_func, recompiler->get_current_module());
 
 	Value *call_values[] = { argument };
@@ -2643,7 +2644,7 @@ int main(int argc, char **argv)
 	if (!load_elf(argv[1], ehdr, mips.get_address_space(), symbol_table))
 		return 1;
 
-	mips.scalar_registers[REG_SP] = symbol_table.find("__recompiler_stack")->second + 64 * 1024 - 16;
+	//mips.scalar_registers[REG_SP] = symbol_table.find("__recompiler_stack")->second + 64 * 1024 - 16;
 
 	mips.enter(ehdr.e_entry);
 	std::terminate(); // Should never happen.

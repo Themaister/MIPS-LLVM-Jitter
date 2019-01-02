@@ -69,7 +69,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		// Do we have the block in the JIT cache? Then we can rely on linking.
 		// If we don't do anything, it is declared as an extern void func(); which needs to be linked by Jitter later.
 		auto external_symbol = jitter->find_symbol(entry_symbol);
-		if (external_symbol.getAddress())
+		if (cantFail(external_symbol.getAddress()) != 0)
 		{
 			Recompiler::Result result = {};
 			result.function = func;
@@ -121,7 +121,12 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 	{
 		std::vector<std::string> symbols;
 		for (auto &f : *this->module)
+		{
+			// Skip any builtin symbols.
+			if (f.getName().front() == '_')
+				continue;
 			symbols.push_back(f.getName());
+		}
 		result.handle = jitter->add_module(move(module_));
 
 		for (auto &name : symbols)

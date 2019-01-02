@@ -29,14 +29,15 @@ __start:
 .ent \call
 
 \call:
-	syscall \code
+	li $v0, \code
+	syscall
 	jr $ra
 
 .end \call
 .size \call, .-\call
 .endm
 
-create_syscall exit 0
-create_syscall write 1
-create_syscall read 2
+create_syscall exit 4001
+create_syscall write 4004
+create_syscall read 4003
 
