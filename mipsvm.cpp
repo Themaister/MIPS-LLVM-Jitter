@@ -2054,7 +2054,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		tracker.flush();
 		create_break(recompiler, tracker.get_argument(), bb, addr, instr.imm);
 		builder.SetInsertPoint(bb);
-		builder.CreateRetVoid();
+		builder.CreateUnreachable();
 		can_do_step_after = false;
 		break;
 	}
@@ -2255,7 +2255,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		tracker.flush();
 		create_sigill(recompiler, tracker.get_argument(), bb, addr);
 		builder.SetInsertPoint(bb);
-		builder.CreateRetVoid();
+		builder.CreateUnreachable();
 		break;
 	}
 
@@ -2644,7 +2644,7 @@ int main(int argc, char **argv)
 	if (!load_elf(argv[1], ehdr, mips.get_address_space(), symbol_table))
 		return 1;
 
-	//mips.scalar_registers[REG_SP] = symbol_table.find("__recompiler_stack")->second + 64 * 1024 - 16;
+	mips.scalar_registers[REG_SP] = symbol_table.find("__recompiler_stack")->second + 64 * 1024 - 16;
 
 	mips.enter(ehdr.e_entry);
 	std::terminate(); // Should never happen.
