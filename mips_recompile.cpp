@@ -5,8 +5,8 @@
 
 using namespace llvm;
 
-//#define LS_DEBUG
-//#define STEP_DEBUG
+#define LS_DEBUG
+#define STEP_DEBUG
 
 #ifdef STEP_DEBUG
 #define STEP() do { \

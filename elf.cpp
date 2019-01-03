@@ -40,6 +40,53 @@ void *VirtualAddressSpace::get_page(uint32_t page) const
 void VirtualAddressSpace::set_page(uint32_t page, void *data)
 {
 	pages[page] = data;
+	if (page < first_page)
+		first_page = page;
+	if (page > last_page)
+		last_page = page;
+}
+
+uint32_t VirtualAddressSpace::allocate_stack(uint32_t size)
+{
+	uint32_t pages = (size + PageSize - 1) / PageSize;
+	uint32_t start = UINT32_MAX / PageSize - pages;
+	auto *mapped = static_cast<uint8_t *>(mmap(nullptr, size,
+	                                           PROT_READ | PROT_WRITE,
+	                                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+
+	if (mapped == MAP_FAILED)
+		return 0;
+
+	auto old_last_page = last_page;
+	for (uint32_t i = 0; i < pages; i++)
+		set_page(start + i, mapped + i * PageSize);
+	last_page = old_last_page;
+
+	return start * PageSize;
+}
+
+uint32_t VirtualAddressSpace::sbrk(uint32_t size)
+{
+	if (size == 0)
+		return (last_page + 1) * PageSize;
+
+	uint32_t pages = (size + PageSize - 1) / PageSize;
+	uint32_t avail_pages = UINT32_MAX / PageSize - last_page;
+	if (avail_pages < pages)
+		return 0;
+
+	auto *mapped = static_cast<uint8_t *>(mmap(nullptr, size,
+	                                           PROT_READ | PROT_WRITE,
+	                                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+
+	if (mapped == MAP_FAILED)
+		return 0;
+
+	uint32_t start = last_page + 1;
+	for (uint32_t i = 0; i < pages; i++)
+		set_page(start + i, mapped + i * PageSize);
+
+	return (start + pages) * PageSize;
 }
 
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space,

@@ -51,21 +51,12 @@ enum Registers
 
 enum Syscalls
 {
-	SYSCALL_SYSCALL = 0,
 	SYSCALL_EXIT = 1,
-	SYSCALL_FORK = 2,
 	SYSCALL_READ = 3,
 	SYSCALL_WRITE = 4,
-	SYSCALL_OPEN = 5,
-	SYSCALL_CLOSE = 6,
-	SYSCALL_WAITPID = 7,
-	SYSCALL_CREAT = 8,
-	SYSCALL_LINK = 9,
-	SYSCALL_IOCTL = 54,
+	SYSCALL_BRK = 45,
 	SYSCALL_WRITEV = 146,
 	SYSCALL_EXIT_GROUP = 246,
-	SYSCALL_SET_TID_ADDRESS = 252,
-	SYSCALL_SET_THREAD_AREA = 283,
 	SYSCALL_COUNT
 };
 
@@ -272,6 +263,7 @@ private:
 	SyscallPtr syscall_table[SYSCALL_COUNT] = {};
 	void syscall_exit();
 	void syscall_write();
+	void syscall_brk();
 	void syscall_writev();
 	void syscall_unimplemented();
 	void syscall_read();

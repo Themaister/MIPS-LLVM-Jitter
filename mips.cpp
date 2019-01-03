@@ -487,10 +487,8 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_EXIT_GROUP] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_WRITE] = &MIPS::syscall_write;
+	syscall_table[SYSCALL_BRK] = &MIPS::syscall_brk;
 	syscall_table[SYSCALL_WRITEV] = &MIPS::syscall_writev;
-	syscall_table[SYSCALL_IOCTL] = &MIPS::syscall_unimplemented;
-	syscall_table[SYSCALL_SET_THREAD_AREA] = &MIPS::syscall_unimplemented;
-	syscall_table[SYSCALL_SET_TID_ADDRESS] = &MIPS::syscall_unimplemented;
 	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
 }
 
@@ -686,13 +684,38 @@ void MIPS::op_syscall(Address addr, uint32_t) noexcept
 	else
 	{
 		fprintf(stderr, "Unimplemented SYSCALL %u called!\n", syscall + 4000);
-		std::abort();
+		syscall_unimplemented();
+		//std::abort();
 	}
 }
 
 void MIPS::syscall_exit()
 {
 	exit(scalar_registers[REG_A0]);
+}
+
+void MIPS::syscall_brk()
+{
+	uint32_t end = scalar_registers[REG_A0];
+	if (end == 0)
+	{
+		scalar_registers[REG_V0] = addr_space.sbrk(0);
+	}
+	else
+	{
+		uint32_t new_end = uint32_t(scalar_registers[REG_A0]);
+		uint32_t cur_end = addr_space.sbrk(0);
+		if (new_end > cur_end)
+		{
+			new_end = addr_space.sbrk(new_end - cur_end);
+			if (new_end)
+				scalar_registers[REG_V0] = new_end;
+			else
+				scalar_registers[REG_V0] = 0;
+		}
+		else
+			scalar_registers[REG_V0] = -1;
+	}
 }
 
 void MIPS::syscall_write()
