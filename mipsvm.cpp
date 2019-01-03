@@ -49,7 +49,7 @@ int main(int argc, char **argv)
 {
 	MIPS mips;
 	Elf32_Ehdr ehdr;
-	if (!load_elf(argv[1], ehdr, mips.get_address_space(), mips.get_symbol_table()))
+	if (!load_elf(argv[1], ehdr, mips.get_address_space(), mips.get_symbol_table(), mips.scalar_registers[REG_TLS]))
 		return 1;
 
 	setup_abi_stack(mips, argc, argv);

@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <functional>
+#include <elf.h>
 
 namespace JITTIR
 {
@@ -90,8 +91,10 @@ uint32_t VirtualAddressSpace::sbrk(uint32_t size)
 }
 
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space,
-              std::unordered_map<std::string, uint32_t> &symbol_table)
+              std::unordered_map<std::string, uint32_t> &symbol_table, int32_t &tls_base)
 {
+	tls_base = 0;
+
 	// Load a very simple MIPS32 little-endian ELF file.
 	int fd = open(path, O_RDONLY);
 	OnExit close_fd([fd]() {
@@ -203,6 +206,22 @@ bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &ad
 
 				for (uint32_t addr = begin_memory_segment; addr < end_memory_segment; addr += VirtualAddressSpace::PageSize)
 					addr_space.set_page(addr / VirtualAddressSpace::PageSize, page + (addr - begin_memory_segment));
+			}
+		}
+		else if (type == PT_TLS && memory_size != 0)
+		{
+			// Load TLS.
+			uint32_t rounded_memsize = phdr->p_memsz + VirtualAddressSpace::PageSize - 1;
+			rounded_memsize &= ~(VirtualAddressSpace::PageSize - 1);
+
+			uint32_t tls = addr_space.sbrk(rounded_memsize) - rounded_memsize;
+			tls_base = tls;
+
+			for (uint32_t i = 0; i < phdr->p_filesz; i++, tls++)
+			{
+				auto *page = static_cast<uint8_t *>(addr_space.get_page(tls / VirtualAddressSpace::PageSize));
+				uint8_t &tls_data = page[tls & (VirtualAddressSpace::PageSize - 1)];
+				tls_data = mapped[phdr->p_offset + i];
 			}
 		}
 	}

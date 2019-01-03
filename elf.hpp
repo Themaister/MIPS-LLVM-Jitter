@@ -27,5 +27,6 @@ using SymbolTable = std::unordered_map<std::string, uint32_t>;
 
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output,
               VirtualAddressSpace &addr_space,
-              SymbolTable &symbol_table);
+              SymbolTable &symbol_table,
+              int32_t &tls_base);
 }

@@ -5,8 +5,8 @@
 
 using namespace llvm;
 
-#define LS_DEBUG
-#define STEP_DEBUG
+//#define LS_DEBUG
+//#define STEP_DEBUG
 
 #ifdef STEP_DEBUG
 #define STEP() do { \
@@ -689,6 +689,10 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		               tracker.read_float(instr.rt));
 		break;
 	}
+
+	case Op::RDHWR_TLS:
+		tracker.write_int(instr.rt, tracker.read_int(REG_TLS));
+		break;
 
 	default:
 		can_do_step_after = false;

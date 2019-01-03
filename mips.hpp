@@ -46,6 +46,7 @@ enum Registers
 	REG_LO,
 	REG_HI,
 	REG_PC,
+	REG_TLS,
 	REG_COUNT
 };
 
@@ -137,6 +138,7 @@ enum class Op
 	COP2,
 	COP3,
 #endif
+	RDHWR_TLS
 };
 
 struct MIPSInstruction
