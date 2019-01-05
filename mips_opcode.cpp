@@ -48,7 +48,7 @@ bool mips_opcode_ends_basic_block(Op op)
 	}
 }
 
-MIPSInstruction decode_mips_instruction(Address pc, uint32_t word)
+MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 {
 	MIPSInstruction instr = {};
 	instr.op = Op::Invalid;
@@ -436,6 +436,16 @@ MIPSInstruction decode_mips_instruction(Address pc, uint32_t word)
 
 	case 0x2e:
 		instr.op = Op::SWR;
+		instr.imm = imm16;
+		break;
+
+	case 0x38:
+		instr.op = Op::SWC0;
+		instr.imm = imm16;
+		break;
+
+	case 0x30:
+		instr.op = Op::LWC0;
 		instr.imm = imm16;
 		break;
 

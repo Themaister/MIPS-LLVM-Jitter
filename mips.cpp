@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/uio.h>
+#include <sys/mman.h>
 
 using namespace llvm;
 
@@ -83,6 +84,8 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_WRITEV] = &MIPS::syscall_writev;
 	syscall_table[SYSCALL_SET_THREAD_AREA] = &MIPS::syscall_set_thread_area;
 	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
+	syscall_table[SYSCALL_MMAP2] = &MIPS::syscall_mmap2;
+	syscall_table[SYSCALL_MMAP] = &MIPS::syscall_mmap;
 }
 
 VirtualAddressSpace &MIPS::get_address_space()
@@ -323,11 +326,17 @@ void MIPS::syscall_write()
 		output.push_back(load8(addr + i));
 
 	scalar_registers[REG_V0] = write(fd, output.data(), count);
+
+	if (scalar_registers[REG_V0] < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+		scalar_registers[REG_A3] = 0;
 }
 
 void MIPS::syscall_unimplemented()
 {
 	scalar_registers[REG_V0] = 0;
+	scalar_registers[REG_A3] = ENOSYS;
 }
 
 void MIPS::syscall_set_thread_area()
@@ -335,6 +344,7 @@ void MIPS::syscall_set_thread_area()
 	Address addr = scalar_registers[REG_A0];
 	scalar_registers[REG_TLS] = addr;
 	scalar_registers[REG_V0] = 0;
+	scalar_registers[REG_A3] = 0;
 }
 
 void MIPS::syscall_writev()
@@ -358,6 +368,67 @@ void MIPS::syscall_writev()
 	}
 
 	scalar_registers[REG_V0] = writev(fd, iov.data(), count);
+
+	if (scalar_registers[REG_V0] < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+		scalar_registers[REG_A3] = 0;
+}
+
+void MIPS::syscall_mmap()
+{
+	uint32_t addr = scalar_registers[REG_A0];
+	uint32_t length = scalar_registers[REG_A1];
+	int prot = scalar_registers[REG_A2];
+	int flags = scalar_registers[REG_A3];
+
+	if (addr != 0)
+	{
+		scalar_registers[REG_A3] = ENOSYS;
+		return;
+	}
+
+	int fd = load32(scalar_registers[REG_SP] + 16);
+	int off = load32(scalar_registers[REG_SP] + 20);
+
+	if (fd == -1)
+		flags |= MAP_ANONYMOUS;
+	flags &= (MAP_ANONYMOUS | MAP_PRIVATE | MAP_SHARED);
+
+	scalar_registers[REG_V0] = addr_space.map_memory(length, prot, flags, fd, off);
+
+	if (!scalar_registers[REG_V0])
+		scalar_registers[REG_A3] = ENOMEM;
+	else
+		scalar_registers[REG_A3] = 0;
+}
+
+void MIPS::syscall_mmap2()
+{
+	uint32_t addr = scalar_registers[REG_A0];
+	uint32_t length = scalar_registers[REG_A1];
+	int prot = scalar_registers[REG_A2];
+	int flags = scalar_registers[REG_A3];
+
+	if (addr != 0)
+	{
+		scalar_registers[REG_A3] = ENOSYS;
+		return;
+	}
+
+	int fd = load32(scalar_registers[REG_SP] + 16);
+	int off = load32(scalar_registers[REG_SP] + 20) * VirtualAddressSpace::PageSize;
+
+	if (fd == -1)
+		flags |= MAP_ANONYMOUS;
+	flags &= (MAP_ANONYMOUS | MAP_PRIVATE | MAP_SHARED);
+
+	scalar_registers[REG_V0] = addr_space.map_memory(length, prot, flags, fd, off);
+
+	if (!scalar_registers[REG_V0])
+		scalar_registers[REG_A3] = ENOMEM;
+	else
+		scalar_registers[REG_A3] = 0;
 }
 
 void MIPS::syscall_read()
@@ -370,6 +441,11 @@ void MIPS::syscall_read()
 	for (ssize_t i = 0; i < ret; i++)
 		store8(addr + i, output[i]);
 	scalar_registers[REG_V0] = ret;
+
+	if (scalar_registers[REG_V0] < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+		scalar_registers[REG_A3] = 0;
 }
 
 MIPS::ExitState MIPS::enter(Address addr) noexcept
@@ -377,6 +453,13 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 	exit_pc = addr;
 	return_stack_count = 0;
 	stack_depth = 0;
+	call_stack_name.clear();
+
+	auto itr = symbol_table.address_to_symbol.find(addr);
+	if (itr != end(symbol_table.address_to_symbol))
+		call_stack_name.push_back(itr->second);
+	else
+		call_stack_name.push_back("??? missing symbol");
 
 	if (auto ret = setjmp(jump_buffer))
 	{
@@ -398,6 +481,14 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 
 void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 {
+	{
+		auto itr = symbol_table.address_to_symbol.find(addr);
+		if (itr != end(symbol_table.address_to_symbol))
+			call_stack_name.push_back(itr->second);
+		else
+			call_stack_name.push_back("??? missing symbol");
+	}
+
 	//fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
 	{
@@ -423,6 +514,7 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 		//fprintf(stderr, "  Successfully predicted return.\n");
 		return_stack_count--;
 		stack_depth = return_stack_count;
+		call_stack_name.pop_back();
 		return nullptr;
 	}
 	else if (addr == 0)
@@ -464,57 +556,6 @@ StubCallPtr MIPS::call(Address addr) noexcept
 		if (!result.call)
 			std::abort();
 		return result.call;
-	}
-}
-
-void MIPS::get_block_from_address(Address addr, Block &block)
-{
-	block.block_start = addr;
-
-	for (;;)
-	{
-		auto instruction = load_instr(addr);
-		bool end_of_basic_block = mips_opcode_ends_basic_block(instruction.op);
-
-		if (end_of_basic_block)
-		{
-			if (mips_opcode_is_branch(instruction.op) && !mips_opcode_is_branch(load_instr(addr + 4).op))
-				block.block_end = addr + 8;
-			else
-				block.block_end = addr + 4;
-
-			switch (instruction.op)
-			{
-			case Op::J:
-				block.terminator = Terminator::DirectBranch;
-				block.static_address_targets[0] = instruction.imm;
-				break;
-
-			case Op::JR:
-			case Op::BREAK:
-			case Op::Invalid:
-				block.terminator = Terminator::Exit;
-				break;
-
-			case Op::BLTZ:
-			case Op::BGEZ:
-			case Op::BLEZ:
-			case Op::BGTZ:
-			case Op::BEQ:
-			case Op::BNE:
-				block.terminator = Terminator::SelectionBranch;
-				block.static_address_targets[0] = instruction.imm;
-				block.static_address_targets[1] = addr + 8;
-				break;
-
-			default:
-				break;
-			}
-
-			break;
-		}
-
-		addr += 4;
 	}
 }
 

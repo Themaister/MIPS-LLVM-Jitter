@@ -3,6 +3,7 @@
 #include "ir_recompile.hpp"
 #include "ir_function.hpp"
 #include "jitter.hpp"
+#include "mips_opcode.hpp"
 #include "elf.hpp"
 #include <setjmp.h>
 
@@ -56,98 +57,14 @@ enum Syscalls
 	SYSCALL_READ = 3,
 	SYSCALL_WRITE = 4,
 	SYSCALL_BRK = 45,
+	SYSCALL_MMAP = 90,
 	SYSCALL_WRITEV = 146,
+	SYSCALL_MMAP2 = 210,
 	SYSCALL_EXIT_GROUP = 246,
 	SYSCALL_SET_THREAD_AREA = 283,
 	SYSCALL_COUNT
 };
 
-enum class Op
-{
-	Invalid,
-	NOP,
-	SLL,
-	SRL,
-	SRA,
-	SLLV,
-	SRLV,
-	SRAV,
-	JR,
-	JALR,
-	SYSCALL,
-	BREAK,
-	MFHI,
-	MFLO,
-	MTHI,
-	MTLO,
-	MULT,
-	MULTU,
-	DIV,
-	DIVU,
-	ADD,
-	ADDU,
-	SUB,
-	SUBU,
-	AND,
-	OR,
-	XOR,
-	NOR,
-	SLT,
-	SLTU,
-	BLTZ,
-	BGEZ,
-	BLTZAL,
-	BGEZAL,
-	J,
-	JAL,
-	BEQ,
-	BNE,
-	BLEZ,
-	BGTZ,
-	ADDI,
-	ADDIU,
-	SLTI,
-	SLTIU,
-	ANDI,
-	ORI,
-	XORI,
-	LUI,
-	LB,
-	LH,
-	LWL,
-	LW,
-	LBU,
-	LHU,
-	LWR,
-	SB,
-	SH,
-	SWL,
-	SW,
-	SWR,
-
-	LWC1,
-	SWC1,
-#if 0
-	LWC0,
-	LWC2,
-	LWC3,
-	SWC0,
-	SWC2,
-	SWC3,
-	COP0,
-	COP1,
-	COP2,
-	COP3,
-#endif
-	RDHWR_TLS
-};
-
-struct MIPSInstruction
-{
-	Op op;
-	uint8_t rs, rt, rd;
-	uint32_t imm;
-};
 
 class RegisterTracker;
 
@@ -271,8 +188,12 @@ private:
 	void syscall_set_thread_area();
 	void syscall_unimplemented();
 	void syscall_read();
+	void syscall_mmap();
+	void syscall_mmap2();
 
 	RegisterState old_state = {};
+
+	std::vector<std::string> call_stack_name;
 };
 
 }

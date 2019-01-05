@@ -663,6 +663,11 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 	}
 
+	case Op::LWC0:
+	case Op::SWC0:
+		// TODO.
+		break;
+
 	case Op::LWC1:
 	{
 #ifdef LS_DEBUG
@@ -725,6 +730,57 @@ void MIPS::recompile_basic_block(
 	if (block.terminator == Terminator::DirectBranch)
 	{
 		BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
+	}
+}
+
+void MIPS::get_block_from_address(Address addr, Block &block)
+{
+	block.block_start = addr;
+
+	for (;;)
+	{
+		auto instruction = load_instr(addr);
+		bool end_of_basic_block = mips_opcode_ends_basic_block(instruction.op);
+
+		if (end_of_basic_block)
+		{
+			if (mips_opcode_is_branch(instruction.op) && !mips_opcode_is_branch(load_instr(addr + 4).op))
+				block.block_end = addr + 8;
+			else
+				block.block_end = addr + 4;
+
+			switch (instruction.op)
+			{
+			case Op::J:
+				block.terminator = Terminator::DirectBranch;
+				block.static_address_targets[0] = instruction.imm;
+				break;
+
+			case Op::JR:
+			case Op::BREAK:
+			case Op::Invalid:
+				block.terminator = Terminator::Exit;
+				break;
+
+			case Op::BLTZ:
+			case Op::BGEZ:
+			case Op::BLEZ:
+			case Op::BGTZ:
+			case Op::BEQ:
+			case Op::BNE:
+				block.terminator = Terminator::SelectionBranch;
+				block.static_address_targets[0] = instruction.imm;
+				block.static_address_targets[1] = addr + 8;
+				break;
+
+			default:
+				break;
+			}
+
+			break;
+		}
+
+		addr += 4;
 	}
 }
 

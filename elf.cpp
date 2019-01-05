@@ -76,16 +76,9 @@ void VirtualAddressSpace::copy(uint32_t dst, const void *data_, uint32_t size)
 	}
 }
 
-uint32_t VirtualAddressSpace::allocate(uint32_t size)
+uint32_t VirtualAddressSpace::map_memory(uint32_t size, int prot, int flags, int fd, int off)
 {
-	size = (size + PageSize - 1) & ~(PageSize - 1);
-	return sbrk(size) - size;
-}
-
-uint32_t VirtualAddressSpace::sbrk(uint32_t size)
-{
-	if (size == 0)
-		return (last_page + 1) * PageSize;
+	size = (size + PageSize - 1) & ~(PageSize - 1); // Align to page.
 
 	uint32_t pages = (size + PageSize - 1) / PageSize;
 	uint32_t avail_pages = UINT32_MAX / PageSize - last_page;
@@ -93,8 +86,8 @@ uint32_t VirtualAddressSpace::sbrk(uint32_t size)
 		return 0;
 
 	auto *mapped = static_cast<uint8_t *>(mmap(nullptr, size,
-	                                           PROT_READ | PROT_WRITE,
-	                                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+	                                           prot & ~PROT_EXEC,
+	                                           flags, fd, off));
 
 	if (mapped == MAP_FAILED)
 		return 0;
@@ -103,11 +96,25 @@ uint32_t VirtualAddressSpace::sbrk(uint32_t size)
 	for (uint32_t i = 0; i < pages; i++)
 		set_page(start + i, mapped + i * PageSize);
 
-	return (start + pages) * PageSize;
+	return start * PageSize;
+
+	return sbrk(size) - size;
+}
+
+uint32_t VirtualAddressSpace::sbrk(uint32_t size)
+{
+	if (size == 0)
+		return (last_page + 1) * PageSize;
+
+	uint32_t mapped = map_memory(size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+	if (!mapped)
+		return 0;
+
+	return mapped + size;
 }
 
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space,
-              std::unordered_map<std::string, uint32_t> &symbol_table, int32_t &tls_base,
+              SymbolTable &symbol_table, int32_t &tls_base,
               uint32_t &phdr_addr)
 {
 	tls_base = 0;
@@ -228,7 +235,7 @@ bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &ad
 		else if (type == PT_TLS && memory_size != 0)
 		{
 			// Load TLS.
-			uint32_t tls = addr_space.allocate(phdr->p_memsz);
+			uint32_t tls = addr_space.map_memory(phdr->p_memsz, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 			tls_base = tls;
 			addr_space.copy(tls, mapped + phdr->p_offset, phdr->p_filesz);
 		}
@@ -236,7 +243,7 @@ bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &ad
 
 	// Copy PHDR data to virtual address space so we can pass it in AUXV (for musl).
 	uint32_t phdr_size = ph_num * ph_size;
-	phdr_addr = addr_space.allocate(phdr_size);
+	phdr_addr = addr_space.map_memory(phdr_size, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	addr_space.copy(phdr_addr, mapped + ehdr->e_phoff, phdr_size);
 
 	uint32_t sh_table = ehdr->e_shoff;
@@ -273,7 +280,8 @@ bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &ad
 				continue;
 
 			const char *name = strings + sym->st_name;
-			symbol_table.emplace(name, sym->st_value);
+			symbol_table.symbol_to_address.emplace(name, sym->st_value);
+			symbol_table.address_to_symbol.emplace(sym->st_value, name);
 		}
 	}
 
