@@ -15,7 +15,10 @@ public:
 	void *get_page(uint32_t page) const;
 
 	uint32_t sbrk(uint32_t size);
+	uint32_t allocate(uint32_t size);
 	uint32_t allocate_stack(uint32_t size);
+
+	void copy(uint32_t dst, const void *data, uint32_t size);
 
 private:
 	std::vector<void *> pages;
@@ -28,5 +31,5 @@ using SymbolTable = std::unordered_map<std::string, uint32_t>;
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output,
               VirtualAddressSpace &addr_space,
               SymbolTable &symbol_table,
-              int32_t &tls_base);
+              int32_t &tls_base, uint32_t &phr_addr);
 }

@@ -58,6 +58,7 @@ enum Syscalls
 	SYSCALL_BRK = 45,
 	SYSCALL_WRITEV = 146,
 	SYSCALL_EXIT_GROUP = 246,
+	SYSCALL_SET_THREAD_AREA = 283,
 	SYSCALL_COUNT
 };
 
@@ -267,6 +268,7 @@ private:
 	void syscall_write();
 	void syscall_brk();
 	void syscall_writev();
+	void syscall_set_thread_area();
 	void syscall_unimplemented();
 	void syscall_read();
 

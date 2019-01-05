@@ -81,6 +81,7 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_WRITE] = &MIPS::syscall_write;
 	syscall_table[SYSCALL_BRK] = &MIPS::syscall_brk;
 	syscall_table[SYSCALL_WRITEV] = &MIPS::syscall_writev;
+	syscall_table[SYSCALL_SET_THREAD_AREA] = &MIPS::syscall_set_thread_area;
 	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
 }
 
@@ -326,6 +327,13 @@ void MIPS::syscall_write()
 
 void MIPS::syscall_unimplemented()
 {
+	scalar_registers[REG_V0] = 0;
+}
+
+void MIPS::syscall_set_thread_area()
+{
+	Address addr = scalar_registers[REG_A0];
+	scalar_registers[REG_TLS] = addr;
 	scalar_registers[REG_V0] = 0;
 }
 

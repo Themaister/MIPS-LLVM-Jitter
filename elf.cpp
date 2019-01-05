@@ -66,6 +66,22 @@ uint32_t VirtualAddressSpace::allocate_stack(uint32_t size)
 	return start * PageSize;
 }
 
+void VirtualAddressSpace::copy(uint32_t dst, const void *data_, uint32_t size)
+{
+	auto *data = static_cast<const uint8_t *>(data_);
+	for (uint32_t i = 0; i < size; i++, dst++, data++)
+	{
+		auto *page = static_cast<uint8_t *>(get_page(dst / PageSize));
+		page[dst & (PageSize - 1)] = *data;
+	}
+}
+
+uint32_t VirtualAddressSpace::allocate(uint32_t size)
+{
+	size = (size + PageSize - 1) & ~(PageSize - 1);
+	return sbrk(size) - size;
+}
+
 uint32_t VirtualAddressSpace::sbrk(uint32_t size)
 {
 	if (size == 0)
@@ -91,7 +107,8 @@ uint32_t VirtualAddressSpace::sbrk(uint32_t size)
 }
 
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space,
-              std::unordered_map<std::string, uint32_t> &symbol_table, int32_t &tls_base)
+              std::unordered_map<std::string, uint32_t> &symbol_table, int32_t &tls_base,
+              uint32_t &phdr_addr)
 {
 	tls_base = 0;
 
@@ -211,20 +228,16 @@ bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &ad
 		else if (type == PT_TLS && memory_size != 0)
 		{
 			// Load TLS.
-			uint32_t rounded_memsize = phdr->p_memsz + VirtualAddressSpace::PageSize - 1;
-			rounded_memsize &= ~(VirtualAddressSpace::PageSize - 1);
-
-			uint32_t tls = addr_space.sbrk(rounded_memsize) - rounded_memsize;
+			uint32_t tls = addr_space.allocate(phdr->p_memsz);
 			tls_base = tls;
-
-			for (uint32_t i = 0; i < phdr->p_filesz; i++, tls++)
-			{
-				auto *page = static_cast<uint8_t *>(addr_space.get_page(tls / VirtualAddressSpace::PageSize));
-				uint8_t &tls_data = page[tls & (VirtualAddressSpace::PageSize - 1)];
-				tls_data = mapped[phdr->p_offset + i];
-			}
+			addr_space.copy(tls, mapped + phdr->p_offset, phdr->p_filesz);
 		}
 	}
+
+	// Copy PHDR data to virtual address space so we can pass it in AUXV (for musl).
+	uint32_t phdr_size = ph_num * ph_size;
+	phdr_addr = addr_space.allocate(phdr_size);
+	addr_space.copy(phdr_addr, mapped + ehdr->e_phoff, phdr_size);
 
 	uint32_t sh_table = ehdr->e_shoff;
 	uint32_t sh_size = ehdr->e_shentsize;
