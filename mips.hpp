@@ -59,8 +59,10 @@ enum Syscalls
 	SYSCALL_OPEN = 5,
 	SYSCALL_CLOSE = 6,
 	SYSCALL_BRK = 45,
+	SYSCALL_READLINK = 85,
 	SYSCALL_MMAP = 90,
 	SYSCALL_MUNMAP = 91,
+	SYSCALL_UNAME = 122,
 	SYSCALL_LLSEEK = 140,
 	SYSCALL_READV = 145,
 	SYSCALL_WRITEV = 146,
@@ -205,6 +207,8 @@ private:
 	void syscall_munmap();
 	void syscall_llseek();
 	void syscall_tkill();
+	void syscall_uname();
+	void syscall_readlink();
 
 	RegisterState old_state = {};
 

@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
+#include <sys/utsname.h>
 
 using namespace llvm;
 
@@ -94,6 +95,8 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_MUNMAP] = &MIPS::syscall_munmap;
 	syscall_table[SYSCALL_LLSEEK] = &MIPS::syscall_llseek;
 	syscall_table[SYSCALL_TKILL] = &MIPS::syscall_tkill;
+	syscall_table[SYSCALL_UNAME] = &MIPS::syscall_uname;
+	syscall_table[SYSCALL_READLINK] = &MIPS::syscall_readlink;
 }
 
 VirtualAddressSpace &MIPS::get_address_space()
@@ -559,6 +562,48 @@ void MIPS::syscall_mmap()
 void MIPS::syscall_mmap2()
 {
 	syscall_mmap_impl(VirtualAddressSpace::PageSize);
+}
+
+void MIPS::syscall_readlink()
+{
+	Address path = scalar_registers[REG_A0];
+	Address buf = scalar_registers[REG_A1];
+	uint32_t bufsize = scalar_registers[REG_A2];
+
+	std::string path_buffer;
+	while (char c = load8(path++))
+		path_buffer.push_back(c);
+
+	std::vector<char> buf_kernel(bufsize);
+	ssize_t ret = readlink(path_buffer.c_str(), buf_kernel.data(), bufsize);
+	if (ret < 0)
+	{
+		scalar_registers[REG_V0] = 0;
+		scalar_registers[REG_A3] = errno;
+	}
+	else
+	{
+		scalar_registers[REG_V0] = ret;
+		scalar_registers[REG_A3] = 0;
+		addr_space.copy_to_user(buf, buf_kernel.data(), bufsize);
+	}
+}
+
+void MIPS::syscall_uname()
+{
+	utsname n;
+	if (uname(&n) < 0)
+	{
+		scalar_registers[REG_V0] = -1;
+		scalar_registers[REG_A3] = errno;
+	}
+	else
+	{
+		// Assume sizeof on MIPS is the same. It's all chars anyways.
+		addr_space.copy_to_user(scalar_registers[REG_A0], &n, sizeof(n));
+		scalar_registers[REG_V0] = 0;
+		scalar_registers[REG_A3] = 0;
+	}
 }
 
 void MIPS::syscall_tkill()

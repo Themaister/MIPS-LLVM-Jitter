@@ -1,4 +1,5 @@
 #include <elf.h>
+#include <unistd.h>
 #include "mips.hpp"
 
 using namespace JITTIR;
@@ -55,13 +56,15 @@ static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, uint32_t phdr, i
 		stack_data.push_back(AT_ENTRY);
 		stack_data.push_back(ehdr.e_entry);
 		stack_data.push_back(AT_UID);
-		stack_data.push_back(0);
+		stack_data.push_back(getuid());
 		stack_data.push_back(AT_EUID);
-		stack_data.push_back(0);
+		stack_data.push_back(geteuid());
 		stack_data.push_back(AT_GID);
-		stack_data.push_back(0);
+		stack_data.push_back(getgid());
 		stack_data.push_back(AT_EGID);
-		stack_data.push_back(0);
+		stack_data.push_back(getegid());
+		stack_data.push_back(AT_RANDOM);
+		stack_data.push_back(stack_top); // Just point to something. glibc needs this.
 		stack_data.push_back(AT_NULL);
 
 		// Allocate stack.
