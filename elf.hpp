@@ -14,11 +14,13 @@ public:
 	void set_page(uint32_t page, void *data);
 	void *get_page(uint32_t page) const;
 
-	uint32_t sbrk(uint32_t size);
+	uint32_t brk(uint32_t addr);
 	uint32_t map_memory(uint32_t size, int prot, int flags, int fd, int off);
+	bool unmap_memory(uint32_t addr, uint32_t length);
 	uint32_t allocate_stack(uint32_t size);
 
-	void copy(uint32_t dst, const void *data, uint32_t size);
+	void copy_to_user(uint32_t dst, const void *data, uint32_t size);
+	void copy_from_user(void *data, uint32_t src, uint32_t size);
 
 private:
 	std::vector<void *> pages;

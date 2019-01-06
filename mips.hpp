@@ -56,10 +56,16 @@ enum Syscalls
 	SYSCALL_EXIT = 1,
 	SYSCALL_READ = 3,
 	SYSCALL_WRITE = 4,
+	SYSCALL_OPEN = 5,
+	SYSCALL_CLOSE = 6,
 	SYSCALL_BRK = 45,
 	SYSCALL_MMAP = 90,
+	SYSCALL_MUNMAP = 91,
+	SYSCALL_LLSEEK = 140,
+	SYSCALL_READV = 145,
 	SYSCALL_WRITEV = 146,
 	SYSCALL_MMAP2 = 210,
+	SYSCALL_TKILL = 236,
 	SYSCALL_EXIT_GROUP = 246,
 	SYSCALL_SET_THREAD_AREA = 283,
 	SYSCALL_COUNT
@@ -183,13 +189,19 @@ private:
 	SyscallPtr syscall_table[SYSCALL_COUNT] = {};
 	void syscall_exit();
 	void syscall_write();
+	void syscall_open();
+	void syscall_close();
 	void syscall_brk();
 	void syscall_writev();
 	void syscall_set_thread_area();
 	void syscall_unimplemented();
 	void syscall_read();
+	void syscall_readv();
 	void syscall_mmap();
 	void syscall_mmap2();
+	void syscall_munmap();
+	void syscall_llseek();
+	void syscall_tkill();
 
 	RegisterState old_state = {};
 

@@ -301,8 +301,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		builder.CreateCall(call, values);
 		BranchInst::Create(bb_return, bb_call);
 
-		builder.SetInsertPoint(bb_return);
-		builder.CreateRetVoid();
+		bb = bb_return;
 		break;
 	}
 
@@ -481,12 +480,16 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 	}
 
+	case Op::SYNC:
+	{
+		// We have no multi-threading support, so this is a noop.
+		break;
+	}
+
 	case Op::BREAK:
 	{
 		tracker.flush();
 		create_break(recompiler, tracker.get_argument(), bb, addr, instr.imm);
-		builder.SetInsertPoint(bb);
-		builder.CreateUnreachable();
 		can_do_step_after = false;
 		break;
 	}
@@ -703,8 +706,6 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		can_do_step_after = false;
 		tracker.flush();
 		create_sigill(recompiler, tracker.get_argument(), bb, addr);
-		builder.SetInsertPoint(bb);
-		builder.CreateUnreachable();
 		break;
 	}
 
@@ -730,6 +731,11 @@ void MIPS::recompile_basic_block(
 	if (block.terminator == Terminator::DirectBranch)
 	{
 		BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
+	}
+	else if (block.terminator == Terminator::Exit)
+	{
+		IRBuilder<> builder(bb);
+		builder.CreateRetVoid();
 	}
 }
 

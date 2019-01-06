@@ -11,6 +11,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
 
@@ -80,12 +81,18 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_EXIT_GROUP] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_WRITE] = &MIPS::syscall_write;
+	syscall_table[SYSCALL_OPEN] = &MIPS::syscall_open;
+	syscall_table[SYSCALL_CLOSE] = &MIPS::syscall_close;
 	syscall_table[SYSCALL_BRK] = &MIPS::syscall_brk;
+	syscall_table[SYSCALL_READV] = &MIPS::syscall_readv;
 	syscall_table[SYSCALL_WRITEV] = &MIPS::syscall_writev;
 	syscall_table[SYSCALL_SET_THREAD_AREA] = &MIPS::syscall_set_thread_area;
 	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
 	syscall_table[SYSCALL_MMAP2] = &MIPS::syscall_mmap2;
 	syscall_table[SYSCALL_MMAP] = &MIPS::syscall_mmap;
+	syscall_table[SYSCALL_MUNMAP] = &MIPS::syscall_munmap;
+	syscall_table[SYSCALL_LLSEEK] = &MIPS::syscall_llseek;
+	syscall_table[SYSCALL_TKILL] = &MIPS::syscall_tkill;
 }
 
 VirtualAddressSpace &MIPS::get_address_space()
@@ -259,7 +266,7 @@ uint8_t MIPS::load8(Address addr) const noexcept
 
 void MIPS::sigill(Address addr) const noexcept
 {
-	kill(getpid(), SIGILL);
+	raise(SIGILL);
 }
 
 void MIPS::op_break(Address addr, uint32_t) noexcept
@@ -292,26 +299,48 @@ void MIPS::syscall_exit()
 
 void MIPS::syscall_brk()
 {
-	uint32_t end = scalar_registers[REG_A0];
-	if (end == 0)
-	{
-		scalar_registers[REG_V0] = addr_space.sbrk(0);
-	}
+	scalar_registers[REG_A3] = 0;
+
+	uint32_t new_end = uint32_t(scalar_registers[REG_A0]);
+	new_end = addr_space.brk(new_end);
+
+	if (new_end)
+		scalar_registers[REG_V0] = new_end;
 	else
 	{
-		uint32_t new_end = uint32_t(scalar_registers[REG_A0]);
-		uint32_t cur_end = addr_space.sbrk(0);
-		if (new_end > cur_end)
-		{
-			new_end = addr_space.sbrk(new_end - cur_end);
-			if (new_end)
-				scalar_registers[REG_V0] = new_end;
-			else
-				scalar_registers[REG_V0] = 0;
-		}
-		else
-			scalar_registers[REG_V0] = -1;
+		scalar_registers[REG_V0] = -1;
+		scalar_registers[REG_A3] = ENOMEM;
 	}
+}
+
+void MIPS::syscall_open()
+{
+	Address path = scalar_registers[REG_A0];
+	int flags = scalar_registers[REG_A1];
+	mode_t mode = scalar_registers[REG_A2];
+
+	std::string path_copied;
+	while (char c = load8(path++))
+		path_copied.push_back(c);
+
+	int fd = open(path_copied.c_str(), flags, mode);
+	scalar_registers[REG_V0] = fd;
+	if (fd < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+		scalar_registers[REG_A3] = 0;
+}
+
+void MIPS::syscall_close()
+{
+	int fd = scalar_registers[REG_A0];
+	int ret = close(fd);
+	scalar_registers[REG_V0] = ret;
+
+	if (ret < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+		scalar_registers[REG_A3] = 0;
 }
 
 void MIPS::syscall_write()
@@ -322,9 +351,7 @@ void MIPS::syscall_write()
 	std::vector<uint8_t> output;
 	output.reserve(count);
 
-	for (uint32_t i = 0; i < count; i++)
-		output.push_back(load8(addr + i));
-
+	addr_space.copy_from_user(output.data(), addr, count);
 	scalar_registers[REG_V0] = write(fd, output.data(), count);
 
 	if (scalar_registers[REG_V0] < 0)
@@ -347,15 +374,65 @@ void MIPS::syscall_set_thread_area()
 	scalar_registers[REG_A3] = 0;
 }
 
+void MIPS::syscall_readv()
+{
+	int fd = scalar_registers[REG_A0];
+	Address addr = scalar_registers[REG_A1];
+	int count = scalar_registers[REG_A2];
+
+	if (count <= 0)
+	{
+		scalar_registers[REG_A3] = EINVAL;
+		return;
+	}
+
+	std::vector<iovec> iov(count);
+	std::vector<std::vector<uint8_t>> buffers(count);
+
+	for (int i = 0; i < count; i++)
+	{
+		uint32_t iov_len = load32(addr + 8 * i + 4);
+		buffers[i].resize(iov_len);
+		iov[i].iov_base = buffers[i].data();
+		iov[i].iov_len = iov_len;
+	}
+
+	ssize_t ret = readv(fd, iov.data(), count);
+
+	scalar_registers[REG_V0] = ret;
+
+	if (ret < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+	{
+		for (int i = 0; i < count; i++)
+		{
+			uint32_t bytes_to_read = std::min<uint32_t>(ret, iov[i].iov_len);
+			if (bytes_to_read)
+			{
+				addr_space.copy_to_user(load32(addr + 8 * i), iov[i].iov_base, bytes_to_read);
+				ret -= bytes_to_read;
+			}
+		}
+		scalar_registers[REG_A3] = 0;
+	}
+}
+
 void MIPS::syscall_writev()
 {
 	int fd = scalar_registers[REG_A0];
 	Address addr = scalar_registers[REG_A1];
-	uint32_t count = scalar_registers[REG_A2];
+	int count = scalar_registers[REG_A2];
+
+	if (count <= 0)
+	{
+		scalar_registers[REG_A3] = EINVAL;
+		return;
+	}
 
 	std::vector<iovec> iov(count);
 	std::vector<std::vector<uint8_t>> buffers(count);
-	for (uint32_t i = 0; i < count; i++)
+	for (int i = 0; i < count; i++)
 	{
 		uint32_t iov_base = load32(addr + 8 * i + 0);
 		uint32_t iov_len = load32(addr + 8 * i + 4);
@@ -373,6 +450,23 @@ void MIPS::syscall_writev()
 		scalar_registers[REG_A3] = errno;
 	else
 		scalar_registers[REG_A3] = 0;
+}
+
+void MIPS::syscall_munmap()
+{
+	uint32_t addr = scalar_registers[REG_A0];
+	uint32_t length = scalar_registers[REG_A1];
+
+	if (addr_space.unmap_memory(addr, length))
+	{
+		scalar_registers[REG_V0] = 0;
+		scalar_registers[REG_A3] = 0;
+	}
+	else
+	{
+		scalar_registers[REG_V0] = -1;
+		scalar_registers[REG_A3] = EINVAL;
+	}
 }
 
 void MIPS::syscall_mmap()
@@ -431,6 +525,41 @@ void MIPS::syscall_mmap2()
 		scalar_registers[REG_A3] = 0;
 }
 
+void MIPS::syscall_tkill()
+{
+	// Not accurate, but it's used for abort() by musl.
+	raise(scalar_registers[REG_A1]);
+	scalar_registers[REG_V0] = 0;
+	scalar_registers[REG_A3] = 0;
+}
+
+void MIPS::syscall_llseek()
+{
+	int fd = scalar_registers[REG_A0];
+	uint32_t off_high = scalar_registers[REG_A1];
+	uint32_t off_lo = scalar_registers[REG_A2];
+	Address loff_ptr = scalar_registers[REG_A3];
+	int whence = load32(scalar_registers[REG_SP] + 16);
+
+	off64_t off = off64_t((uint64_t(off_high) << 32) | off_lo);
+
+	off64_t ret = lseek64(fd, off, whence);
+	if (ret < 0)
+	{
+		scalar_registers[REG_V0] = ret;
+		scalar_registers[REG_A3] = errno;
+	}
+	else
+	{
+		scalar_registers[REG_V0] = 0;
+		scalar_registers[REG_A3] = 0;
+
+		// Little endian.
+		store32(loff_ptr + 0, ret & 0xffffffffu);
+		store32(loff_ptr + 4, (ret >> 32) & 0xffffffffu);
+	}
+}
+
 void MIPS::syscall_read()
 {
 	int fd = scalar_registers[REG_A0];
@@ -438,8 +567,9 @@ void MIPS::syscall_read()
 	uint32_t count = scalar_registers[REG_A2];
 	std::vector<uint8_t> output(count);
 	ssize_t ret = ::read(fd, output.data(), count);
-	for (ssize_t i = 0; i < ret; i++)
-		store8(addr + i, output[i]);
+
+	if (ret > 0)
+		addr_space.copy_to_user(addr, output.data(), ret);
 	scalar_registers[REG_V0] = ret;
 
 	if (scalar_registers[REG_V0] < 0)

@@ -66,7 +66,7 @@ uint32_t VirtualAddressSpace::allocate_stack(uint32_t size)
 	return start * PageSize;
 }
 
-void VirtualAddressSpace::copy(uint32_t dst, const void *data_, uint32_t size)
+void VirtualAddressSpace::copy_to_user(uint32_t dst, const void *data_, uint32_t size)
 {
 	auto *data = static_cast<const uint8_t *>(data_);
 	for (uint32_t i = 0; i < size; i++, dst++, data++)
@@ -74,6 +74,35 @@ void VirtualAddressSpace::copy(uint32_t dst, const void *data_, uint32_t size)
 		auto *page = static_cast<uint8_t *>(get_page(dst / PageSize));
 		page[dst & (PageSize - 1)] = *data;
 	}
+}
+
+void VirtualAddressSpace::copy_from_user(void *data_, uint32_t src, uint32_t size)
+{
+	auto *data = static_cast<uint8_t *>(data_);
+	for (uint32_t i = 0; i < size; i++, src++, data++)
+	{
+		auto *page = static_cast<const uint8_t *>(get_page(src / PageSize));
+		*data = page[src & (PageSize - 1)];
+	}
+}
+
+bool VirtualAddressSpace::unmap_memory(uint32_t addr, uint32_t length)
+{
+	uint32_t page = addr / PageSize;
+	uint32_t num_pages = (length + PageSize - 1) & ~(PageSize - 1);
+	for (uint32_t i = 0; i < num_pages; i++)
+		if (!get_page(page + i))
+			return false;
+
+	for (uint32_t i = 0; i < num_pages; i++)
+	{
+		// Is this legal? Could just null out the pages instead and avoid the unmap.
+		if (munmap(pages[page + i], PageSize) < 0)
+			return false;
+		pages[page + i] = nullptr;
+	}
+
+	return true;
 }
 
 uint32_t VirtualAddressSpace::map_memory(uint32_t size, int prot, int flags, int fd, int off)
@@ -97,20 +126,22 @@ uint32_t VirtualAddressSpace::map_memory(uint32_t size, int prot, int flags, int
 		set_page(start + i, mapped + i * PageSize);
 
 	return start * PageSize;
-
-	return sbrk(size) - size;
 }
 
-uint32_t VirtualAddressSpace::sbrk(uint32_t size)
+uint32_t VirtualAddressSpace::brk(uint32_t end)
 {
-	if (size == 0)
-		return (last_page + 1) * PageSize;
+	uint32_t current_end = (last_page + 1) * PageSize;
 
-	uint32_t mapped = map_memory(size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+	// Cannot decrement the data segment.
+	if (end == 0 || end <= current_end)
+		return current_end;
+
+	uint32_t mapped = map_memory(end - current_end, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	if (!mapped)
-		return 0;
+		return current_end;
 
-	return mapped + size;
+	current_end = (last_page + 1) * PageSize;
+	return current_end;
 }
 
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &addr_space,
@@ -237,14 +268,14 @@ bool load_elf(const char *path, Elf32_Ehdr &ehdr_output, VirtualAddressSpace &ad
 			// Load TLS.
 			uint32_t tls = addr_space.map_memory(phdr->p_memsz, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 			tls_base = tls;
-			addr_space.copy(tls, mapped + phdr->p_offset, phdr->p_filesz);
+			addr_space.copy_to_user(tls, mapped + phdr->p_offset, phdr->p_filesz);
 		}
 	}
 
 	// Copy PHDR data to virtual address space so we can pass it in AUXV (for musl).
 	uint32_t phdr_size = ph_num * ph_size;
 	phdr_addr = addr_space.map_memory(phdr_size, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	addr_space.copy(phdr_addr, mapped + ehdr->e_phoff, phdr_size);
+	addr_space.copy_to_user(phdr_addr, mapped + ehdr->e_phoff, phdr_size);
 
 	uint32_t sh_table = ehdr->e_shoff;
 	uint32_t sh_size = ehdr->e_shentsize;

@@ -1,6 +1,6 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR mipsel)
 set(CMAKE_C_COMPILER mipsel-linux-gnu-gcc)
-set(CMAKE_C_FLAGS "-mgp32 -march=mips1 -I ${CMAKE_SYSROOT}/include")
+set(CMAKE_C_FLAGS "-mgp32 -march=mips1 -I ${CMAKE_SYSROOT}/include -nostdlib")
 set(CMAKE_ASM_FLAGS "-mgp32 -march=mips1")
 set(CMAKE_C_LINK_EXECUTABLE "mipsel-linux-gnu-gcc <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES> -nostartfiles -nostdlib -L ${CMAKE_SYSROOT}/lib ${CMAKE_SYSROOT}/lib/crt1.o -lc -lgcc")

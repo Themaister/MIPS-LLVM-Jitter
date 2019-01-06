@@ -83,7 +83,8 @@ enum class Op
 	COP2,
 	COP3,
 #endif
-	RDHWR_TLS
+	RDHWR_TLS,
+	SYNC,
 };
 
 struct MIPSInstruction

@@ -127,6 +127,10 @@ MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 			instr.imm = imm26 >> 6;
 			break;
 
+		case 0xf:
+			instr.op = Op::SYNC;
+			break;
+
 		case 0x10:
 			instr.op = Op::MFHI;
 			break;
