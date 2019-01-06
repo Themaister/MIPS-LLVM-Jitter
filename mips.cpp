@@ -97,6 +97,7 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_TKILL] = &MIPS::syscall_tkill;
 	syscall_table[SYSCALL_UNAME] = &MIPS::syscall_uname;
 	syscall_table[SYSCALL_READLINK] = &MIPS::syscall_readlink;
+	syscall_table[SYSCALL_OPENAT] = &MIPS::syscall_openat;
 }
 
 VirtualAddressSpace &MIPS::get_address_space()
@@ -315,6 +316,25 @@ void MIPS::syscall_brk()
 		scalar_registers[REG_V0] = -1;
 		scalar_registers[REG_A3] = ENOMEM;
 	}
+}
+
+void MIPS::syscall_openat()
+{
+	int dirfd = scalar_registers[REG_A0];
+	Address path = scalar_registers[REG_A1];
+	int flags = scalar_registers[REG_A2];
+	mode_t mode = scalar_registers[REG_A3];
+
+	std::string path_copied;
+	while (char c = load8(path++))
+		path_copied.push_back(c);
+
+	int fd = openat(dirfd, path_copied.c_str(), flags, mode);
+	scalar_registers[REG_V0] = fd;
+	if (fd < 0)
+		scalar_registers[REG_A3] = errno;
+	else
+		scalar_registers[REG_A3] = 0;
 }
 
 void MIPS::syscall_open()

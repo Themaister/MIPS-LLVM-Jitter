@@ -71,6 +71,7 @@ enum Syscalls
 	SYSCALL_TKILL = 236,
 	SYSCALL_EXIT_GROUP = 246,
 	SYSCALL_SET_THREAD_AREA = 283,
+	SYSCALL_OPENAT = 288,
 	SYSCALL_COUNT
 };
 
@@ -193,6 +194,7 @@ private:
 	void syscall_exit();
 	void syscall_write();
 	void syscall_open();
+	void syscall_openat();
 	void syscall_close();
 	void syscall_brk();
 	void syscall_writev();
