@@ -444,12 +444,12 @@ MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 		break;
 
 	case 0x38:
-		instr.op = Op::SWC0;
+		instr.op = Op::SC;
 		instr.imm = imm16;
 		break;
 
 	case 0x30:
-		instr.op = Op::LWC0;
+		instr.op = Op::LL;
 		instr.imm = imm16;
 		break;
 

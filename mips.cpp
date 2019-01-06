@@ -1,4 +1,4 @@
-#include "elf.hpp"
+#include "linuxvm.hpp"
 #include "mips.hpp"
 #include "jitter.hpp"
 #include "mips_c_stubs.hpp"
@@ -90,6 +90,7 @@ MIPS::MIPS()
 	syscall_table[SYSCALL_READ] = &MIPS::syscall_read;
 	syscall_table[SYSCALL_MMAP2] = &MIPS::syscall_mmap2;
 	syscall_table[SYSCALL_MMAP] = &MIPS::syscall_mmap;
+	syscall_table[SYSCALL_MREMAP] = &MIPS::syscall_mremap;
 	syscall_table[SYSCALL_MUNMAP] = &MIPS::syscall_munmap;
 	syscall_table[SYSCALL_LLSEEK] = &MIPS::syscall_llseek;
 	syscall_table[SYSCALL_TKILL] = &MIPS::syscall_tkill;
@@ -469,7 +470,60 @@ void MIPS::syscall_munmap()
 	}
 }
 
-void MIPS::syscall_mmap()
+void MIPS::syscall_mremap()
+{
+	// We can only do this if old_addr + old_size points to brk point.
+	// Assume this is only used for MAP_ANON/PRIVATE regions, like for realloc().
+	// Can't support this for file mmap, but seriously ...
+
+	Address old_addr = scalar_registers[REG_A0];
+	uint32_t old_size = scalar_registers[REG_A1];
+	uint32_t new_size = scalar_registers[REG_A2];
+	int flags = scalar_registers[REG_A3];
+
+	if (flags & MREMAP_FIXED) // Not supported.
+	{
+		scalar_registers[REG_V0] = -1;
+		scalar_registers[REG_A3] = EINVAL;
+		return;
+	}
+
+	if (new_size < old_size)
+	{
+		scalar_registers[REG_V0] = old_addr;
+		scalar_registers[REG_A3] = 0;
+		return;
+	}
+
+	if (old_addr + old_size == addr_space.brk(0) &&
+	    addr_space.map_memory(new_size - old_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0))
+	{
+		scalar_registers[REG_V0] = old_addr;
+		scalar_registers[REG_A3] = 0;
+	}
+	else if (flags & MREMAP_MAYMOVE)
+	{
+		// Move old pages to a new address space, and allocate some more ...
+		Address new_addr = addr_space.realloc_memory(old_addr, old_size, new_size);
+		if (new_addr)
+		{
+			scalar_registers[REG_V0] = new_addr;
+			scalar_registers[REG_A3] = 0;
+		}
+		else
+		{
+			scalar_registers[REG_V0] = -1;
+			scalar_registers[REG_A3] = ENOMEM;
+		}
+	}
+	else
+	{
+		scalar_registers[REG_V0] = -1;
+		scalar_registers[REG_A3] = ENOMEM;
+	}
+}
+
+void MIPS::syscall_mmap_impl(int page_mult)
 {
 	uint32_t addr = scalar_registers[REG_A0];
 	uint32_t length = scalar_registers[REG_A1];
@@ -483,7 +537,7 @@ void MIPS::syscall_mmap()
 	}
 
 	int fd = load32(scalar_registers[REG_SP] + 16);
-	int off = load32(scalar_registers[REG_SP] + 20);
+	int off = load32(scalar_registers[REG_SP] + 20) * page_mult;
 
 	if (fd == -1)
 		flags |= MAP_ANONYMOUS;
@@ -497,32 +551,14 @@ void MIPS::syscall_mmap()
 		scalar_registers[REG_A3] = 0;
 }
 
+void MIPS::syscall_mmap()
+{
+	syscall_mmap_impl(1);
+}
+
 void MIPS::syscall_mmap2()
 {
-	uint32_t addr = scalar_registers[REG_A0];
-	uint32_t length = scalar_registers[REG_A1];
-	int prot = scalar_registers[REG_A2];
-	int flags = scalar_registers[REG_A3];
-
-	if (addr != 0)
-	{
-		scalar_registers[REG_A3] = ENOSYS;
-		return;
-	}
-
-	int fd = load32(scalar_registers[REG_SP] + 16);
-	int off = load32(scalar_registers[REG_SP] + 20) * VirtualAddressSpace::PageSize;
-
-	if (fd == -1)
-		flags |= MAP_ANONYMOUS;
-	flags &= (MAP_ANONYMOUS | MAP_PRIVATE | MAP_SHARED);
-
-	scalar_registers[REG_V0] = addr_space.map_memory(length, prot, flags, fd, off);
-
-	if (!scalar_registers[REG_V0])
-		scalar_registers[REG_A3] = ENOMEM;
-	else
-		scalar_registers[REG_A3] = 0;
+	syscall_mmap_impl(VirtualAddressSpace::PageSize);
 }
 
 void MIPS::syscall_tkill()

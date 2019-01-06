@@ -4,7 +4,7 @@
 #include "ir_function.hpp"
 #include "jitter.hpp"
 #include "mips_opcode.hpp"
-#include "elf.hpp"
+#include "linuxvm.hpp"
 #include <setjmp.h>
 
 namespace JITTIR
@@ -64,6 +64,7 @@ enum Syscalls
 	SYSCALL_LLSEEK = 140,
 	SYSCALL_READV = 145,
 	SYSCALL_WRITEV = 146,
+	SYSCALL_MREMAP = 167,
 	SYSCALL_MMAP2 = 210,
 	SYSCALL_TKILL = 236,
 	SYSCALL_EXIT_GROUP = 246,
@@ -198,6 +199,8 @@ private:
 	void syscall_read();
 	void syscall_readv();
 	void syscall_mmap();
+	void syscall_mremap();
+	void syscall_mmap_impl(int page_mult);
 	void syscall_mmap2();
 	void syscall_munmap();
 	void syscall_llseek();

@@ -67,8 +67,8 @@ enum class Op
 	SW,
 	SWR,
 
-	LWC0,
-	SWC0,
+	LL,
+	SC,
 	LWC1,
 	SWC1,
 #if 0

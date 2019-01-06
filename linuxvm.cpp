@@ -1,4 +1,4 @@
-#include "elf.hpp"
+#include "linuxvm.hpp"
 
 #include <sys/mman.h>
 #include <sys/fcntl.h>
@@ -89,7 +89,7 @@ void VirtualAddressSpace::copy_from_user(void *data_, uint32_t src, uint32_t siz
 bool VirtualAddressSpace::unmap_memory(uint32_t addr, uint32_t length)
 {
 	uint32_t page = addr / PageSize;
-	uint32_t num_pages = (length + PageSize - 1) & ~(PageSize - 1);
+	uint32_t num_pages = (length + PageSize - 1) / PageSize;
 	for (uint32_t i = 0; i < num_pages; i++)
 		if (!get_page(page + i))
 			return false;
@@ -102,7 +102,38 @@ bool VirtualAddressSpace::unmap_memory(uint32_t addr, uint32_t length)
 		pages[page + i] = nullptr;
 	}
 
+	if (page + num_pages == last_page + 1)
+		last_page = page - 1;
+
 	return true;
+}
+
+uint32_t VirtualAddressSpace::realloc_memory(uint32_t old_addr, uint32_t old_size, uint32_t new_size)
+{
+	uint32_t page = old_addr / PageSize;
+	uint32_t old_pages = (old_size + PageSize - 1) / PageSize;
+	uint32_t new_pages = (new_size + PageSize - 1) / PageSize;
+	uint32_t avail_pages = UINT32_MAX / PageSize - last_page;
+
+	if (avail_pages < new_pages)
+		return 0;
+
+	auto *mapped = static_cast<uint8_t *>(mmap(nullptr, (new_pages - old_pages) * PageSize,
+	                                           PROT_READ | PROT_WRITE,
+	                                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+	if (!mapped)
+		return 0;
+
+	// Copy old pages.
+	uint32_t start = last_page + 1;
+	for (uint32_t i = 0; i < old_pages; i++)
+		set_page(start + i, get_page(page + i));
+
+	// Allocate new pages.
+	for (uint32_t i = old_pages; i < new_pages; i++, mapped += PageSize)
+		set_page(start + i, mapped);
+
+	return start * PageSize;
 }
 
 uint32_t VirtualAddressSpace::map_memory(uint32_t size, int prot, int flags, int fd, int off)

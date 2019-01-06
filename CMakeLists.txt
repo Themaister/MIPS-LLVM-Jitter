@@ -49,7 +49,7 @@ endif()
 add_library(jitter STATIC
         jitter.hpp jitter.cpp
         ir_function.hpp ir_function.cpp
-        elf.cpp elf.hpp
+        linuxvm.cpp linuxvm.hpp
         mips.hpp mips.cpp
         mips_c_stubs.cpp
         mips_external_calls.cpp

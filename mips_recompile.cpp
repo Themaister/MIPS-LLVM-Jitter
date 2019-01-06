@@ -558,6 +558,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 	}
 
+	case Op::LL: // No threading, can just use LW as LW.
 	case Op::LW:
 	{
 #ifdef LS_DEBUG
@@ -599,6 +600,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 	}
 
+	case Op::SC:
 	case Op::SW:
 	{
 #ifdef LS_DEBUG
@@ -609,6 +611,12 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
 		               tracker.read_int(instr.rt));
+
+		if (instr.op == Op::SC)
+		{
+			// Pretend we always succeed. Should work fine as long as we're not doing multi-core.
+			tracker.write_int(instr.rt, ConstantInt::get(Type::getInt32Ty(ctx), 1));
+		}
 		break;
 	}
 
@@ -665,11 +673,6 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		           tracker.read_int(instr.rt));
 		break;
 	}
-
-	case Op::LWC0:
-	case Op::SWC0:
-		// TODO.
-		break;
 
 	case Op::LWC1:
 	{
