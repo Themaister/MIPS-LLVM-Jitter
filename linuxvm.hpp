@@ -12,7 +12,6 @@ public:
 	enum { PageSize = 0x1000 };
 	VirtualAddressSpace();
 	void set_page(uint32_t page, void *data);
-	void *get_page(uint32_t page) const;
 
 	uint32_t brk(uint32_t addr);
 	uint32_t map_memory(uint32_t size, int prot, int flags, int fd, int off);
@@ -26,6 +25,11 @@ public:
 	uint32_t get_brk() const
 	{
 		return brk_page * PageSize;
+	}
+
+	inline void *get_page(uint32_t page) const
+	{
+		return pages[page];
 	}
 
 private:
