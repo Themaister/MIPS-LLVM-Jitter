@@ -84,6 +84,7 @@ class MIPS : public JITTIR::RegisterState, public JITTIR::RecompilerBackend, pub
 {
 public:
 	MIPS();
+	~MIPS();
 	VirtualAddressSpace &get_address_space();
 	SymbolTable &get_symbol_table();
 
@@ -123,6 +124,9 @@ public:
 	StubCallPtr call_addr(Address addr, Address expected_addr) noexcept;
 	void predict_return(Address addr, Address expected_addr) noexcept;
 	StubCallPtr jump_addr(Address addr) noexcept;
+
+	void set_external_ir_dump_directory(const std::string &dir);
+	void set_external_symbol(Address addr, void (*symbol)(RegisterState *));
 
 private:
 	VirtualAddressSpace addr_space;
@@ -214,7 +218,12 @@ private:
 
 	RegisterState old_state = {};
 
+#ifdef DEBUG_CALLSTACK
 	std::vector<std::string> call_stack_name;
+#endif
+
+	std::string llvm_dump_dir;
+	void dump_symbol_addresses(const std::string &path) const;
 };
 
 }

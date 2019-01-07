@@ -62,7 +62,7 @@ MIPS::MIPS()
 {
 	jitter.add_external_symbol("__recompiler_call_addr", __recompiler_call_addr);
 	jitter.add_external_symbol("__recompiler_predict_return", __recompiler_predict_return);
-	jitter.add_external_symbol("__recompiler_jump_indirect", __recompiler_jump_addr);
+	jitter.add_external_symbol("__recompiler_jump_indirect", __recompiler_jump_indirect);
 	jitter.add_external_symbol("__recompiler_store32", __recompiler_store32);
 	jitter.add_external_symbol("__recompiler_store16", __recompiler_store16);
 	jitter.add_external_symbol("__recompiler_store8", __recompiler_store8);
@@ -271,6 +271,8 @@ uint8_t MIPS::load8(Address addr) const noexcept
 
 void MIPS::sigill(Address addr) const noexcept
 {
+	if (!llvm_dump_dir.empty())
+		dump_symbol_addresses(llvm_dump_dir + "/addr.bin");
 	raise(SIGILL);
 }
 
@@ -299,6 +301,8 @@ void MIPS::op_syscall(Address addr, uint32_t) noexcept
 
 void MIPS::syscall_exit()
 {
+	if (!llvm_dump_dir.empty())
+		dump_symbol_addresses(llvm_dump_dir + "/addr.bin");
 	exit(scalar_registers[REG_A0]);
 }
 
@@ -712,6 +716,8 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 	exit_pc = addr;
 	return_stack_count = 0;
 	stack_depth = 0;
+
+#ifdef DEBUG_CALLSTACK
 	call_stack_name.clear();
 
 	auto itr = symbol_table.address_to_symbol.find(addr);
@@ -719,6 +725,7 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 		call_stack_name.push_back(itr->second);
 	else
 		call_stack_name.push_back("??? missing symbol");
+#endif
 
 	if (auto ret = setjmp(jump_buffer))
 	{
@@ -740,6 +747,7 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 
 void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 {
+#ifdef DEBUG_CALLSTACK
 	{
 		auto itr = symbol_table.address_to_symbol.find(addr);
 		if (itr != end(symbol_table.address_to_symbol))
@@ -747,6 +755,7 @@ void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 		else
 			call_stack_name.push_back("??? missing symbol");
 	}
+#endif
 
 	//fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
@@ -773,7 +782,9 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 		//fprintf(stderr, "  Successfully predicted return.\n");
 		return_stack_count--;
 		stack_depth = return_stack_count;
+#ifdef DEBUG_CALLSTACK
 		call_stack_name.pop_back();
+#endif
 		return nullptr;
 	}
 	else if (addr == 0)
@@ -818,4 +829,44 @@ StubCallPtr MIPS::call(Address addr) noexcept
 	}
 }
 
+void MIPS::dump_symbol_addresses(const std::string &path) const
+{
+	FILE *f = fopen(path.c_str(), "wb");
+	if (!f)
+	{
+		fprintf(stderr, "Failed to dump symbol addresses.\n");
+		return;
+	}
+
+	for (auto &block : blocks)
+	{
+		if (fwrite(&block.first, sizeof(Address), 1, f) != 1)
+		{
+			fprintf(stderr, "Failed to write out address to disk.\n");
+			break;
+		}
+	}
+
+	fclose(f);
 }
+
+void MIPS::set_external_ir_dump_directory(const std::string &dir)
+{
+	jitter.set_external_ir_dump_directory(dir);
+	llvm_dump_dir = dir;
+}
+
+void MIPS::set_external_symbol(Address addr, void (*symbol)(RegisterState *))
+{
+	blocks.emplace(addr, symbol);
+	jitter.add_external_symbol(std::string("_") + std::to_string(addr), symbol);
+}
+
+MIPS::~MIPS()
+{
+	if (!llvm_dump_dir.empty())
+		dump_symbol_addresses(llvm_dump_dir + "/addr.bin");
+}
+}
+
+#include "mips_c_stubs.inc"

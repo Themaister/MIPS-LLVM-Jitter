@@ -40,6 +40,11 @@ std::unique_ptr<Module> Jitter::create_module(const std::string &name)
 #endif
 }
 
+void Jitter::set_external_ir_dump_directory(const std::string &dir)
+{
+	ir_dump_dir = dir;
+}
+
 void Jitter::add_external_symbol_generic(const std::string &name, uint64_t symbol)
 {
 	externals[name] = symbol;
@@ -131,11 +136,15 @@ Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
 	for (auto &func : *module)
 		pass_manager.run(func);
 
-	std::error_code err;
-	llvm::raw_fd_ostream ostr(std::string("/tmp/llvm/") + module->getSourceFileName() + ".ll", err);
-	module->print(ostr, nullptr);
+	fprintf(stderr, "Recompiling module ...\n");
 
-	//module->print(errs(), nullptr);
+	if (!ir_dump_dir.empty())
+	{
+		std::error_code err;
+		llvm::raw_fd_ostream ostr(ir_dump_dir + "/" + module->getSourceFileName() + ".ll", err);
+		module->print(ostr, nullptr);
+	}
+
 	auto K = execution_session->allocateVModule();
 	auto error = compile_layer->addModule(K, std::move(module));
 	if (error)

@@ -51,16 +51,18 @@ add_library(jitter STATIC
         ir_function.hpp ir_function.cpp
         linuxvm.cpp linuxvm.hpp
         mips.hpp mips.cpp
-        mips_c_stubs.cpp
+        mips_c_stubs.inc
         mips_external_calls.cpp
         mips_recompile.cpp
         register_tracker.cpp register_tracker.hpp
         mips_opcode.hpp mips_opcode.cpp
+        cli_parser.hpp cli_parser.cpp
         ir_recompile.cpp ir_recompile.hpp)
 
 add_executable(mipsvm mipsvm.cpp)
 target_link_libraries(mipsvm PRIVATE jitter)
 target_compile_options(mipsvm PRIVATE ${JITTER_CXX_FLAGS})
+set_target_properties(mipsvm PROPERTIES LINK_FLAGS "-rdynamic")
 
 target_compile_options(jitter PRIVATE ${JITTER_CXX_FLAGS})
 target_include_directories(jitter PUBLIC ${LLVM_INCLUDE_DIRS})

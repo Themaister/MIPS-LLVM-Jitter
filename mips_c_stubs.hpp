@@ -7,7 +7,7 @@ extern "C"
 {
 JITTIR::StubCallPtr __recompiler_call_addr(JITTIR::RegisterState *regs, JITTIR::Address addr, JITTIR::Address expected_addr);
 void __recompiler_predict_return(JITTIR::RegisterState *regs, JITTIR::Address addr, JITTIR::Address expected_addr);
-JITTIR::StubCallPtr __recompiler_jump_addr(JITTIR::RegisterState *regs, JITTIR::Address addr);
+JITTIR::StubCallPtr __recompiler_jump_indirect(JITTIR::RegisterState *regs, JITTIR::Address addr);
 void __recompiler_store32(JITTIR::RegisterState *regs, JITTIR::Address addr, uint32_t value);
 void __recompiler_store16(JITTIR::RegisterState *regs, JITTIR::Address addr, uint32_t value);
 void __recompiler_store8(JITTIR::RegisterState *regs, JITTIR::Address addr, uint32_t value);

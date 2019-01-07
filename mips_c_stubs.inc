@@ -1,3 +1,5 @@
+#pragma once
+
 #include "mips.hpp"
 
 using namespace JITTIR;
@@ -14,7 +16,7 @@ void __recompiler_predict_return(RegisterState *regs, Address addr, Address expe
 	static_cast<MIPS *>(regs)->predict_return(addr, expected_addr);
 }
 
-StubCallPtr __recompiler_jump_addr(RegisterState *regs, Address addr)
+StubCallPtr __recompiler_jump_indirect(RegisterState *regs, Address addr)
 {
 	return static_cast<MIPS *>(regs)->jump_addr(addr);
 }

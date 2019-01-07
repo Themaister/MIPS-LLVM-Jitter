@@ -1,6 +1,8 @@
 #include <elf.h>
 #include <unistd.h>
 #include "mips.hpp"
+#include "cli_parser.hpp"
+#include <dlfcn.h>
 
 using namespace JITTIR;
 
@@ -80,10 +82,89 @@ static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, uint32_t phdr, i
 
 int main(int argc, char **argv)
 {
+	CLICallbacks cbs;
+
+	std::string static_lib;
+	std::string static_symbols;
+	std::string mips_binary;
+	std::string llvm_dir;
+
+	cbs.add("--static-lib", [&](CLIParser &parser) {
+		static_lib = parser.next_string();
+	});
+
+	cbs.add("--static-symbols", [&](CLIParser &parser) {
+		static_symbols = parser.next_string();
+	});
+
+	cbs.add("--dump-llvm", [&](CLIParser &parser) {
+		llvm_dir = parser.next_string();
+	});
+
+	cbs.default_handler = [&](const char *def) {
+		mips_binary = def;
+	};
+
+	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
+	if (!parser.parse())
+		return 1;
+	else if (parser.is_ended_state())
+		return 0;
+
 	MIPS mips;
+
+	if (mips_binary.empty())
+	{
+		fprintf(stderr, "Need MIPS binary.\n");
+		return 1;
+	}
+
+	if (!llvm_dir.empty())
+		mips.set_external_ir_dump_directory(llvm_dir);
+
+	void *dylib = nullptr;
+	if (!static_lib.empty())
+	{
+		dylib = dlopen(static_lib.c_str(), RTLD_NOW);
+		if (!dylib)
+		{
+			fprintf(stderr, "Failed to open dylib: %s (%s)\n", static_lib.c_str(), dlerror());
+			return 1;
+		}
+	}
+
+	if (!static_symbols.empty())
+	{
+		if (!dylib)
+		{
+			fprintf(stderr, "Need a dylib to use --static-symbols.\n");
+			return 1;
+		}
+
+		FILE *f = fopen(static_symbols.c_str(), "rb");
+		if (!f)
+		{
+			fprintf(stderr, "Failed to open %s for reading.\n", static_symbols.c_str());
+			return 1;
+		}
+
+		Address addr;
+		while (fread(&addr, sizeof(addr), 1, f) == 1)
+		{
+			std::string sym = "_" + std::to_string(addr);
+			auto *callable = (void (*)(RegisterState *)) dlsym(dylib, sym.c_str());
+			if (callable)
+				mips.set_external_symbol(addr, callable);
+			else
+				fprintf(stderr, "Could not find symbol: %s\n", sym.c_str());
+		}
+
+		fclose(f);
+	}
+
 	Elf32_Ehdr ehdr;
 	uint32_t phdr;
-	if (!load_elf(argv[1], ehdr, mips.get_address_space(), mips.get_symbol_table(),
+	if (!load_elf(mips_binary.c_str(), ehdr, mips.get_address_space(), mips.get_symbol_table(),
 	              mips.scalar_registers[REG_TLS], phdr))
 		return 1;
 

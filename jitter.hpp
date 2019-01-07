@@ -43,6 +43,8 @@ public:
 
 	void add_external_symbol_generic(const std::string &name, uint64_t symbol);
 
+	void set_external_ir_dump_directory(const std::string &dir);
+
 private:
 #ifdef JITTER_LLVM_VERSION_LEGACY
 	llvm::LLVMContext context;
@@ -67,5 +69,6 @@ private:
 	std::unique_ptr<llvm::orc::MangleAndInterner> mangler;
 	std::unique_ptr<llvm::DataLayout> data_layout;
 	std::unordered_map<std::string, uint64_t> externals;
+	std::string ir_dump_dir;
 };
 }
