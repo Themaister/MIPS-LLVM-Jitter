@@ -163,9 +163,21 @@ uint32_t VirtualAddressSpace::brk(uint32_t end)
 {
 	uint32_t current_end = (last_page + 1) * PageSize;
 
+	if (end == 0)
+	{
+		// Last observed brk.
+		brk_page = last_page + 1;
+	}
+
 	// Cannot decrement the data segment.
 	if (end == 0 || end <= current_end)
 		return current_end;
+
+	// Check if we can actually allocate any longer with brk.
+	uint32_t end_page = end / PageSize;
+	for (uint32_t p = brk_page; p < end_page; p++)
+		if (get_page(p))
+			return current_end;
 
 	uint32_t mapped = map_memory(end - current_end, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	if (!mapped)

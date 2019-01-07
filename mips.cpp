@@ -306,16 +306,40 @@ void MIPS::syscall_brk()
 {
 	scalar_registers[REG_A3] = 0;
 
-	uint32_t new_end = uint32_t(scalar_registers[REG_A0]);
-	new_end = addr_space.brk(new_end);
+	Address old_brk = addr_space.get_brk();
+	uint32_t new_brk = uint32_t(scalar_registers[REG_A0]);
+	uint32_t actual_brk = addr_space.brk(new_brk);
 
-	if (new_end)
-		scalar_registers[REG_V0] = new_end;
+	if (new_brk == 0 || old_brk == new_brk || actual_brk == new_brk)
+		scalar_registers[REG_V0] = actual_brk;
 	else
 	{
 		scalar_registers[REG_V0] = -1;
 		scalar_registers[REG_A3] = ENOMEM;
 	}
+}
+
+static int translate_open_flags(int flags)
+{
+	int new_flags = flags & O_ACCMODE;
+	if (flags & 0x8)
+		new_flags |= O_APPEND;
+	if (flags & 0x10)
+		new_flags |= O_DSYNC;
+	if (flags & 0x80)
+		new_flags |= O_NONBLOCK;
+	if (flags & 0x100)
+		new_flags |= O_CREAT;
+	if (flags & 0x200)
+		new_flags |= O_TRUNC;
+	if (flags & 0x400)
+		new_flags |= O_EXCL;
+	if (flags & 0x800)
+		new_flags |= O_NOCTTY;
+	if (flags & 0x2000)
+		new_flags |= O_LARGEFILE;
+
+	return new_flags;
 }
 
 void MIPS::syscall_openat()
@@ -328,6 +352,8 @@ void MIPS::syscall_openat()
 	std::string path_copied;
 	while (char c = load8(path++))
 		path_copied.push_back(c);
+
+	flags = translate_open_flags(flags);
 
 	int fd = openat(dirfd, path_copied.c_str(), flags, mode);
 	scalar_registers[REG_V0] = fd;
@@ -346,6 +372,8 @@ void MIPS::syscall_open()
 	std::string path_copied;
 	while (char c = load8(path++))
 		path_copied.push_back(c);
+
+	flags = translate_open_flags(flags);
 
 	int fd = open(path_copied.c_str(), flags, mode);
 	scalar_registers[REG_V0] = fd;

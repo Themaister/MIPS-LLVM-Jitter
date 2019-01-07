@@ -23,10 +23,16 @@ public:
 	void copy_to_user(uint32_t dst, const void *data, uint32_t size);
 	void copy_from_user(void *data, uint32_t src, uint32_t size);
 
+	uint32_t get_brk() const
+	{
+		return brk_page * PageSize;
+	}
+
 private:
 	std::vector<void *> pages;
 	uint32_t last_page = 1;
 	uint32_t first_page = UINT32_MAX / PageSize;
+	uint32_t brk_page = 0;
 };
 
 struct SymbolTable
