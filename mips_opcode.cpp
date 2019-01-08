@@ -468,6 +468,72 @@ MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 			instr.op = Op::RDHWR_TLS;
 		break;
 
+	case 0x11:
+	{
+		// COP1 - floating point fun!
+		uint8_t fmt = (word >> 20) & 31;
+		uint8_t fd = (word >> 5) & 31;
+		uint8_t fs = (word >> 10) & 31;
+		uint8_t ft = (word >> 15) & 31;
+
+		switch (low_op)
+		{
+		case 5:
+			instr.op = fmt == 16 ? Op::FABS_F32 : Op::FABS_F64;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x30:
+			instr.op = fmt == 16 ? Op::COMP_F_F32 : Op::COMP_F_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x31:
+			instr.op = fmt == 16 ? Op::COMP_UN_F32 : Op::COMP_UN_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x32:
+			instr.op = fmt == 16 ? Op::COMP_EQ_F32 : Op::COMP_EQ_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x33:
+			instr.op = fmt == 16 ? Op::COMP_UEQ_F32 : Op::COMP_UEQ_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x34:
+			instr.op = fmt == 16 ? Op::COMP_OLT_F32 : Op::COMP_OLT_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x35:
+			instr.op = fmt == 16 ? Op::COMP_ULT_F32 : Op::COMP_ULT_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x36:
+			instr.op = fmt == 16 ? Op::COMP_OLE_F32 : Op::COMP_OLE_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+
+		case 0x37:
+			instr.op = fmt == 16 ? Op::COMP_ULE_F32 : Op::COMP_ULE_F64;
+			instr.rs = fs;
+			instr.rt = ft;
+			break;
+		}
+	}
+
 	default:
 		break;
 	}
