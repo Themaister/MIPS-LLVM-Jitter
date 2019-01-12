@@ -34,7 +34,7 @@ llvm::Module *Recompiler::get_current_module()
 	return module;
 }
 
-Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Module *target_module)
+Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Module *target_module, llvm::Type *argument_type)
 {
 	unique_ptr<llvm::Module> module_;
 	if (target_module)
@@ -62,9 +62,22 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 	}
 
 	// Create our function.
-	llvm::Type *types[] = { llvm::Type::getInt32PtrTy(ctx) };
-	auto *function_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
-	auto *func = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+	if (!argument_type)
+	{
+		auto *int_register_array = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx),
+		                                                VirtualMachineState::MaxIntegerRegisters);
+		auto *float_register_array = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx),
+		                                                  VirtualMachineState::MaxFloatRegisters);
+		auto *page_array = llvm::ArrayType::get(llvm::PointerType::get(llvm::Type::getVoidTy(ctx), 0),
+		                                        1u << (32u - 12u));
+		llvm::Type *struct_types[] = { int_register_array, float_register_array, page_array };
+		argument_type = llvm::StructType::create(struct_types);
+		argument_type = llvm::PointerType::get(argument_type, 0);
+	}
+
+	llvm::Type *types[] = { argument_type };
+	auto *func_type = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), types, false);
+	auto *func = llvm::Function::Create(func_type, llvm::Function::ExternalLinkage,
 	                                    entry_symbol,
 	                                    module);
 

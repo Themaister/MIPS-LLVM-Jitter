@@ -45,7 +45,7 @@ public:
 	{
 	}
 
-	Result recompile_function(Function &function, llvm::Module *target_module = nullptr);
+	Result recompile_function(Function &function, llvm::Module *target_module = nullptr, llvm::Type *argument_type = nullptr);
 	llvm::BasicBlock *get_block_for_address(Address addr);
 	llvm::Function *get_current_function();
 	llvm::Module *get_current_module();

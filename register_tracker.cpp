@@ -36,7 +36,14 @@ Value *RegisterTracker::read_int(unsigned index)
 	if (int_registers[index])
 		return int_registers[index];
 
-	auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index, std::string("Reg") + std::to_string(index) + "Ptr");
+	auto &ctx = builder->getContext();
+	Value *indices[] = {
+		ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		ConstantInt::get(Type::getInt32Ty(ctx), index),
+	};
+
+	auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string("Reg") + std::to_string(index) + "Ptr");
 	int_registers[index] = builder->CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
 	return int_registers[index];
 }
@@ -53,8 +60,14 @@ Value *RegisterTracker::read_fp_w(unsigned index)
 	if (float_registers[index])
 		return float_registers[index];
 
-	auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index + VirtualMachineState::MaxIntegerRegisters,
-	                                                std::string("FReg") + std::to_string(index) + "Ptr");
+	auto &ctx = builder->getContext();
+	Value *indices[] = {
+		ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		ConstantInt::get(Type::getInt32Ty(ctx), 1),
+		ConstantInt::get(Type::getInt32Ty(ctx), index),
+	};
+
+	auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string("FReg") + std::to_string(index) + "Ptr");
 	float_registers[index] = builder->CreateLoad(ptr, std::string("FReg") + std::to_string(index) + "Loaded");
 	return float_registers[index];
 }
@@ -115,11 +128,19 @@ Value *RegisterTracker::read_fp_d(unsigned index)
 
 void RegisterTracker::flush()
 {
+	auto &ctx = builder->getContext();
+
 	for (int i = 0; i < VirtualMachineState::MaxIntegerRegisters; i++)
 	{
 		if (dirty_int & (1ull << i))
 		{
-			auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, i, std::string("Reg") + std::to_string(i) + "Ptr");
+			Value *indices[] = {
+				ConstantInt::get(Type::getInt32Ty(ctx), 0),
+				ConstantInt::get(Type::getInt32Ty(ctx), 0),
+				ConstantInt::get(Type::getInt32Ty(ctx), i),
+			};
+
+			auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string("Reg") + std::to_string(i) + "Ptr");
 			builder->CreateStore(int_registers[i], ptr);
 		}
 	}
@@ -128,8 +149,13 @@ void RegisterTracker::flush()
 	{
 		if (dirty_float & (1ull << i))
 		{
-			auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, i + VirtualMachineState::MaxIntegerRegisters,
-			                                                std::string("FReg") + std::to_string(i) + "Ptr");
+			Value *indices[] = {
+				ConstantInt::get(Type::getInt32Ty(ctx), 0),
+				ConstantInt::get(Type::getInt32Ty(ctx), 1),
+				ConstantInt::get(Type::getInt32Ty(ctx), i),
+			};
+
+			auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string("FReg") + std::to_string(i) + "Ptr");
 			builder->CreateStore(float_registers[i], ptr);
 		}
 	}
