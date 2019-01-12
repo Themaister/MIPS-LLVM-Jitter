@@ -2,8 +2,6 @@
 
 using namespace llvm;
 
-#define INLINE_LS
-
 namespace JITTIR
 {
 Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr, Address expected_return)
@@ -11,45 +9,48 @@ Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
-#define CALL_AGGRESSIVE_JIT
-#ifdef CALL_AGGRESSIVE_JIT
-	if (!calls.predict_return)
+	if (options.inline_static_address_calls)
 	{
-		Type *types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
-		auto *function_type = FunctionType::get(Type::getVoidTy(ctx), types, false);
-		calls.predict_return = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
-		                                              "__recompiler_predict_return", recompiler->get_current_module());
+		if (!calls.predict_return)
+		{
+			Type *types[] = {argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)};
+			auto *function_type = FunctionType::get(Type::getVoidTy(ctx), types, false);
+			calls.predict_return = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+			                                              "__recompiler_predict_return",
+			                                              recompiler->get_current_module());
 
+		}
+
+		if (expected_return)
+		{
+			Value *values[] = {
+					argument,
+					ConstantInt::get(Type::getInt32Ty(ctx), addr),
+					ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
+			};
+			builder.CreateCall(calls.predict_return, values);
+		}
+
+		// Eagerly compile all our call-sites as well, can facilitate inlining! :D
+		JITTIR::Recompiler tmp(&blocks);
+		tmp.set_jitter(&jitter);
+		tmp.set_backend(this);
+		JITTIR::Function tmp_func;
+		tmp_func.set_entry_address(addr);
+		tmp_func.set_backend(this);
+		auto result = tmp.recompile_function(tmp_func, recompiler->get_current_module(), argument->getType());
+
+		Value *call_values[] = {argument};
+		auto *call_instr = builder.CreateCall(result.function, call_values);
+		if (!expected_return)
+			call_instr->setTailCall(true);
+		return nullptr;
 	}
-
-	if (expected_return)
+	else
 	{
-		Value *values[] = {
-			argument,
-			ConstantInt::get(Type::getInt32Ty(ctx), addr),
-			ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
-		};
-		builder.CreateCall(calls.predict_return, values);
+		// Thunk out calls all the time, even when address is static.
+		return create_call(recompiler, argument, bb, ConstantInt::get(Type::getInt32Ty(ctx), addr), expected_return);
 	}
-
-	// Eagerly compile all our call-sites as well, can facilitate inlining! :D
-	JITTIR::Recompiler tmp(&blocks);
-	tmp.set_jitter(&jitter);
-	tmp.set_backend(this);
-	JITTIR::Function tmp_func;
-	tmp_func.set_entry_address(addr);
-	tmp_func.set_backend(this);
-	auto result = tmp.recompile_function(tmp_func, recompiler->get_current_module(), argument->getType());
-
-	Value *call_values[] = { argument };
-	auto *call_instr = builder.CreateCall(result.function, call_values);
-	if (!expected_return)
-		call_instr->setTailCall(true);
-	return nullptr;
-#else
-	// Thunk out calls all the time, even when address is static.
-	return create_call(recompiler, argument, bb, ConstantInt::get(Type::getInt32Ty(ctx), addr), expected_return);
-#endif
 }
 
 Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Address expected_return)
@@ -98,7 +99,6 @@ Value *MIPS::create_jump_indirect(Recompiler *recompiler, Value *argument, Basic
 	return builder.CreateCall(calls.jump_indirect, values, "jump_addr");
 }
 
-#ifdef INLINE_LS
 static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, unsigned shift)
 {
 	auto &ctx = builder.getContext();
@@ -141,28 +141,30 @@ static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, un
 	auto *ptr = builder.CreateInBoundsGEP(page, offset, "PagePtr");
 	return ptr;
 }
-#endif
 
 void MIPS::create_store32(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value)
 {
 	IRBuilder<> builder(bb);
 
-#ifdef INLINE_LS
-	auto *ptr = get_pointer(builder, argument, addr, 2);
-	builder.CreateStore(value, ptr);
-#else
-	auto &ctx = builder.getContext();
-	if (!calls.store32)
+	if (options.inline_load_store)
 	{
-		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
-		auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
-		calls.store32 = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
-		                                       "__recompiler_store32", recompiler->get_current_module());
+		auto *ptr = get_pointer(builder, argument, addr, 2);
+		builder.CreateStore(value, ptr);
 	}
+	else
+	{
+		auto &ctx = builder.getContext();
+		if (!calls.store32)
+		{
+			Type *store_types[] = {argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)};
+			auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
+			calls.store32 = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
+			                                       "__recompiler_store32", recompiler->get_current_module());
+		}
 
-	Value *values[] = { argument, addr, value };
-	builder.CreateCall(calls.store32, values);
-#endif
+		Value *values[] = {argument, addr, value};
+		builder.CreateCall(calls.store32, values);
+	}
 }
 
 void MIPS::create_swl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value)
@@ -204,21 +206,24 @@ void MIPS::create_store16(Recompiler *recompiler, Value *argument, BasicBlock *b
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
-#ifdef INLINE_LS
-	auto *ptr = get_pointer(builder, argument, addr, 1);
-	builder.CreateStore(builder.CreateTrunc(value, Type::getInt16Ty(ctx), "StoreTrunc"), ptr);
-#else
-	if (!calls.store16)
+	if (options.inline_load_store)
 	{
-		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
-		auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
-		calls.store16 = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
-		                                       "__recompiler_store16", recompiler->get_current_module());
+		auto *ptr = get_pointer(builder, argument, addr, 1);
+		builder.CreateStore(builder.CreateTrunc(value, Type::getInt16Ty(ctx), "StoreTrunc"), ptr);
 	}
+	else
+	{
+		if (!calls.store16)
+		{
+			Type *store_types[] = {argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)};
+			auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
+			calls.store16 = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
+			                                       "__recompiler_store16", recompiler->get_current_module());
+		}
 
-	Value *values[] = { argument, addr, value };
-	builder.CreateCall(calls.store16, values);
-#endif
+		Value *values[] = {argument, addr, value};
+		builder.CreateCall(calls.store16, values);
+	}
 }
 
 void MIPS::create_store8(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value)
@@ -226,21 +231,24 @@ void MIPS::create_store8(Recompiler *recompiler, Value *argument, BasicBlock *bb
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
-#ifdef INLINE_LS
-	auto *ptr = get_pointer(builder, argument, addr, 0);
-	builder.CreateStore(builder.CreateTrunc(value, Type::getInt8Ty(ctx), "StoreTrunc"), ptr);
-#else
-	if (!calls.store8)
+	if (options.inline_load_store)
 	{
-		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
-		auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
-		calls.store8 = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
-		                                      "__recompiler_store8", recompiler->get_current_module());
+		auto *ptr = get_pointer(builder, argument, addr, 0);
+		builder.CreateStore(builder.CreateTrunc(value, Type::getInt8Ty(ctx), "StoreTrunc"), ptr);
 	}
+	else
+	{
+		if (!calls.store8)
+		{
+			Type *store_types[] = {argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)};
+			auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
+			calls.store8 = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
+			                                      "__recompiler_store8", recompiler->get_current_module());
+		}
 
-	Value *values[] = { argument, addr, value };
-	builder.CreateCall(calls.store8, values);
-#endif
+		Value *values[] = {argument, addr, value};
+		builder.CreateCall(calls.store8, values);
+	}
 }
 
 Value *MIPS::create_lwl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *old_value, Value *addr)
@@ -281,66 +289,75 @@ Value *MIPS::create_load32(Recompiler *recompiler, Value *argument, BasicBlock *
 {
 	IRBuilder<> builder(bb);
 
-#ifdef INLINE_LS
-	auto *ptr = get_pointer(builder, argument, addr, 2);
-	return builder.CreateLoad(ptr, "Loaded");
-#else
-	auto &ctx = builder.getContext();
-	if (!calls.load32)
+	if (options.inline_load_store)
 	{
-		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx) };
-		auto *load_type = FunctionType::get(Type::getInt32Ty(ctx), load_types, false);
-		calls.load32 = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                      "__recompiler_load32", recompiler->get_current_module());
+		auto *ptr = get_pointer(builder, argument, addr, 2);
+		return builder.CreateLoad(ptr, "Loaded");
 	}
+	else
+	{
+		auto &ctx = builder.getContext();
+		if (!calls.load32)
+		{
+			Type *load_types[] = {argument->getType(), Type::getInt32Ty(ctx)};
+			auto *load_type = FunctionType::get(Type::getInt32Ty(ctx), load_types, false);
+			calls.load32 = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
+			                                      "__recompiler_load32", recompiler->get_current_module());
+		}
 
-	Value *values[] = { argument, addr };
-	return builder.CreateCall(calls.load32, values);
-#endif
+		Value *values[] = {argument, addr};
+		return builder.CreateCall(calls.load32, values);
+	}
 }
 
 Value *MIPS::create_load16(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr)
 {
 	IRBuilder<> builder(bb);
 
-#ifdef INLINE_LS
-	auto *ptr = get_pointer(builder, argument, addr, 1);
-	return builder.CreateLoad(ptr, "Loaded");
-#else
-	auto &ctx = builder.getContext();
-	if (!calls.load16)
+	if (options.inline_load_store)
 	{
-		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx) };
-		auto *load_type = FunctionType::get(Type::getInt16Ty(ctx), load_types, false);
-		calls.load16 = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                      "__recompiler_load16", recompiler->get_current_module());
+		auto *ptr = get_pointer(builder, argument, addr, 1);
+		return builder.CreateLoad(ptr, "Loaded");
 	}
+	else
+	{
+		auto &ctx = builder.getContext();
+		if (!calls.load16)
+		{
+			Type *load_types[] = {argument->getType(), Type::getInt32Ty(ctx)};
+			auto *load_type = FunctionType::get(Type::getInt16Ty(ctx), load_types, false);
+			calls.load16 = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
+			                                      "__recompiler_load16", recompiler->get_current_module());
+		}
 
-	Value *values[] = { argument, addr };
-	return builder.CreateCall(calls.load16, values);
-#endif
+		Value *values[] = {argument, addr};
+		return builder.CreateCall(calls.load16, values);
+	}
 }
 
 Value *MIPS::create_load8(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr)
 {
 	IRBuilder<> builder(bb);
 
-#ifdef INLINE_LS
-	auto *ptr = get_pointer(builder, argument, addr, 0);
-	return builder.CreateLoad(ptr, "Loaded");
-#else
-	auto &ctx = builder.getContext();
-	if (!calls.load8)
+	if (options.inline_load_store)
 	{
-		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx) };
-		auto *load_type = FunctionType::get(Type::getInt8Ty(ctx), load_types, false);
-		calls.load8 = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                     "__recompiler_load8", recompiler->get_current_module());
+		auto *ptr = get_pointer(builder, argument, addr, 0);
+		return builder.CreateLoad(ptr, "Loaded");
 	}
+	else
+	{
+		auto &ctx = builder.getContext();
+		if (!calls.load8)
+		{
+			Type *load_types[] = {argument->getType(), Type::getInt32Ty(ctx)};
+			auto *load_type = FunctionType::get(Type::getInt8Ty(ctx), load_types, false);
+			calls.load8 = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
+			                                     "__recompiler_load8", recompiler->get_current_module());
+		}
 
-	Value *values[] = { argument, addr };
-	return builder.CreateCall(calls.load8, values);
-#endif
+		Value *values[] = {argument, addr};
+		return builder.CreateCall(calls.load8, values);
+	}
 }
 
 void MIPS::create_sigill(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr)

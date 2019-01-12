@@ -7,8 +7,6 @@
 #include "linuxvm.hpp"
 #include <setjmp.h>
 
-//#define DEBUG_CALLSTACK
-
 namespace JITTIR
 {
 enum Registers
@@ -115,7 +113,6 @@ enum Syscalls
 	SYSCALL_COUNT
 };
 
-
 class RegisterTracker;
 
 using StubCallPtr = void (*)(VirtualMachineState *);
@@ -123,6 +120,27 @@ using StubCallPtr = void (*)(VirtualMachineState *);
 class MIPS : public VirtualMachineState, public RecompilerBackend, public BlockAnalysisBackend
 {
 public:
+	struct Options
+	{
+		// Inlines code to load and store, instead of calling out to helper functions.
+		// Enable this to debug loads and stores.
+		bool inline_load_store = true;
+
+		// Flush all registers for each load/store for debugging.
+		bool debug_load_store_registers = false;
+
+		// Call into thunk for every instruction for deep debugging.
+		bool debug_step = false;
+
+		// Aggressively inline and early compile all call paths.
+		bool inline_static_address_calls = true;
+	};
+
+	void set_options(const Options &options)
+	{
+		this->options = options;
+	}
+
 	static std::unique_ptr<MIPS> create();
 	~MIPS();
 	VirtualAddressSpace &get_address_space();
@@ -257,10 +275,7 @@ private:
 	void syscall_readlink();
 
 	VirtualMachineState old_state = {};
-
-#ifdef DEBUG_CALLSTACK
-	std::vector<std::string> call_stack_name;
-#endif
+	Options options;
 
 	std::string llvm_dump_dir;
 	void dump_symbol_addresses(const std::string &path) const;

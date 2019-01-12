@@ -720,16 +720,6 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 	return_stack_count = 0;
 	stack_depth = 0;
 
-#ifdef DEBUG_CALLSTACK
-	call_stack_name.clear();
-
-	auto itr = symbol_table.address_to_symbol.find(addr);
-	if (itr != end(symbol_table.address_to_symbol))
-		call_stack_name.push_back(itr->second);
-	else
-		call_stack_name.push_back("??? missing symbol");
-#endif
-
 	if (auto ret = setjmp(jump_buffer))
 	{
 		ExitState state = {};
@@ -750,16 +740,6 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 
 void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 {
-#ifdef DEBUG_CALLSTACK
-	{
-		auto itr = symbol_table.address_to_symbol.find(addr);
-		if (itr != end(symbol_table.address_to_symbol))
-			call_stack_name.push_back(itr->second);
-		else
-			call_stack_name.push_back("??? missing symbol");
-	}
-#endif
-
 	//fprintf(stderr, "Calling 0x%x, Expecting return to 0x%x.\n", addr, expected_addr);
 	if (return_stack_count >= 1024)
 	{
@@ -786,9 +766,6 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 		//fprintf(stderr, "  Successfully predicted return.\n");
 		return_stack_count--;
 		stack_depth = return_stack_count;
-#ifdef DEBUG_CALLSTACK
-		call_stack_name.pop_back();
-#endif
 		return nullptr;
 	}
 	else if (addr == 0)

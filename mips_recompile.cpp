@@ -5,27 +5,6 @@
 
 using namespace llvm;
 
-//#define LS_DEBUG
-//#define STEP_DEBUG
-
-#ifdef STEP_DEBUG
-#define STEP() do { \
-	tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr)); \
-	tracker.flush(); \
-	call_step(recompiler, tracker.get_argument(), bb); \
-	tracker.invalidate(); \
-} while(0)
-
-#define STEP_AFTER() do { \
-	tracker.flush(); \
-	call_step_after(recompiler, tracker.get_argument(), bb); \
-	tracker.invalidate(); \
-} while(0)
-#else
-#define STEP() ((void)0)
-#define STEP_AFTER() ((void)0)
-#endif
-
 namespace JITTIR
 {
 void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
@@ -34,6 +13,36 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	auto &ctx = builder.getContext();
 	auto instr = load_instr(addr);
 	bool can_do_step_after = true;
+
+	const auto STEP = [&]()
+	{
+		if (options.debug_step)
+		{
+			tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+			tracker.flush();
+			call_step(recompiler, tracker.get_argument(), bb);
+			tracker.invalidate();
+		}
+	};
+
+	const auto STEP_AFTER = [&]()
+	{
+		if (options.debug_step)
+		{
+			tracker.flush();
+			call_step_after(recompiler, tracker.get_argument(), bb);
+			tracker.invalidate();
+		}
+	};
+
+	const auto LS_FLUSH = [&]()
+	{
+		if (options.debug_load_store_registers)
+		{
+			tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
+			tracker.flush();
+		}
+	};
 
 	STEP();
 
@@ -513,10 +522,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LB:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_load8(recompiler, tracker.get_argument(), bb,
 		                            builder.CreateAdd(tracker.read_int(instr.rs),
 		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -529,10 +535,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LH:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_load16(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -545,10 +548,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LBU:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_load8(recompiler, tracker.get_argument(), bb,
 		                            builder.CreateAdd(tracker.read_int(instr.rs),
 		                                              ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -561,10 +561,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LHU:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_load16(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -578,10 +575,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::LL: // No threading, can just use LW as LW.
 	case Op::LW:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_load32(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -593,10 +587,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SB:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		create_store8(recompiler, tracker.get_argument(), bb,
 		              builder.CreateAdd(tracker.read_int(instr.rs),
 		                                ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SBAddr"),
@@ -606,10 +597,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SH:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		create_store16(recompiler, tracker.get_argument(), bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SHAddr"),
@@ -620,10 +608,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	case Op::SC:
 	case Op::SW:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		create_store32(recompiler, tracker.get_argument(), bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
@@ -639,10 +624,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LWL:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_lwl(recompiler, tracker.get_argument(), bb, tracker.read_int(instr.rt),
 		                          builder.CreateAdd(tracker.read_int(instr.rs),
 		                                            ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -653,10 +635,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LWR:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_lwr(recompiler, tracker.get_argument(), bb, tracker.read_int(instr.rt),
 		                          builder.CreateAdd(tracker.read_int(instr.rs),
 		                                            ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -667,10 +646,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SWL:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		create_swl(recompiler, tracker.get_argument(), bb,
 		           builder.CreateAdd(tracker.read_int(instr.rs),
 		                             ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWLAddr"),
@@ -680,10 +656,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SWR:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		create_swr(recompiler, tracker.get_argument(), bb,
 		           builder.CreateAdd(tracker.read_int(instr.rs),
 		                             ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWRAddr"),
@@ -693,10 +666,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::LWC1:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		auto *loaded = create_load32(recompiler, tracker.get_argument(), bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
@@ -707,10 +677,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::SWC1:
 	{
-#ifdef LS_DEBUG
-		tracker.write_int(REG_PC, ConstantInt::get(Type::getInt32Ty(ctx), addr));
-		tracker.flush();
-#endif
+		LS_FLUSH();
 		create_store32(recompiler, tracker.get_argument(), bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
