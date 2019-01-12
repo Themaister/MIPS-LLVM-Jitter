@@ -68,8 +68,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		                                                VirtualMachineState::MaxIntegerRegisters);
 		auto *float_register_array = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx),
 		                                                  VirtualMachineState::MaxFloatRegisters);
-		auto *page_array = llvm::ArrayType::get(llvm::PointerType::get(llvm::Type::getVoidTy(ctx), 0),
-		                                        VirtualAddressSpace::PageCount);
+		auto *page_array = llvm::ArrayType::get(llvm::Type::getInt8PtrTy(ctx), VirtualAddressSpace::PageCount);
 		llvm::Type *struct_types[] = { int_register_array, float_register_array, page_array };
 		argument_type = llvm::StructType::create(struct_types);
 		argument_type = llvm::PointerType::get(argument_type, 0);
