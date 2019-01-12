@@ -41,7 +41,7 @@ Value *RegisterTracker::read_int(unsigned index)
 	return int_registers[index];
 }
 
-void RegisterTracker::write_float(unsigned index, Value *value)
+void RegisterTracker::write_fp_w(unsigned index, Value *value)
 {
 	if (index != 0)
 	{
@@ -50,7 +50,7 @@ void RegisterTracker::write_float(unsigned index, Value *value)
 	}
 }
 
-Value *RegisterTracker::read_float(unsigned index)
+Value *RegisterTracker::read_fp_w(unsigned index)
 {
 	if (float_registers[index])
 		return float_registers[index];
@@ -59,6 +59,57 @@ Value *RegisterTracker::read_float(unsigned index)
 	                                                std::string("FReg") + std::to_string(index) + "Ptr");
 	float_registers[index] = builder->CreateLoad(ptr, std::string("FReg") + std::to_string(index) + "Loaded");
 	return float_registers[index];
+}
+
+void RegisterTracker::write_fp_s(unsigned index, Value *value)
+{
+	auto &ctx = builder->getContext();
+	auto *word = builder->CreateBitCast(value, Type::getInt32Ty(ctx), "SToWBitCast");
+	write_fp_w(index, word);
+}
+
+void RegisterTracker::write_fp_l(unsigned index, Value *dword)
+{
+	auto &ctx = builder->getContext();
+	index &= ~1;
+	write_fp_w(index, builder->CreateTrunc(dword, Type::getInt32Ty(ctx), "TruncTo32Lo"));
+	write_fp_w(index + 1, builder->CreateTrunc(builder->CreateLShr(dword, ConstantInt::get(Type::getInt64Ty(ctx), 32)), Type::getInt32Ty(builder->getContext()), "TruncTo32Hi"));
+}
+
+void RegisterTracker::write_fp_d(unsigned index, Value *value)
+{
+	auto &ctx = builder->getContext();
+	auto *dword = builder->CreateBitCast(value, Type::getInt64Ty(ctx), "SToWBitCast");
+	write_fp_l(index, dword);
+}
+
+Value *RegisterTracker::read_fp_s(unsigned index)
+{
+	auto &ctx = builder->getContext();
+	auto *word = read_fp_w(index);
+	auto *fp32 = builder->CreateBitCast(word, Type::getFloatTy(ctx), "WToSBitCast");
+	return fp32;
+}
+
+Value *RegisterTracker::read_fp_l(unsigned index)
+{
+	auto &ctx = builder->getContext();
+	index &= ~1;
+	auto *word_lo = read_fp_w(index);
+	auto *word_hi = read_fp_w(index + 1);
+	word_lo = builder->CreateZExt(word_lo, Type::getInt64Ty(ctx), "ZExtTo64Lo");
+	word_hi = builder->CreateZExt(word_hi, Type::getInt64Ty(ctx), "ZExtTo64Hi");
+	word_hi = builder->CreateShl(word_hi, ConstantInt::get(Type::getInt64Ty(ctx), 32), "ShlHi");
+	auto *dword = builder->CreateOr(word_lo, word_hi, "FP64Combine");
+	return dword;
+}
+
+Value *RegisterTracker::read_fp_d(unsigned index)
+{
+	auto &ctx = builder->getContext();
+	auto *dword = read_fp_l(index);
+	auto *fp64 = builder->CreateBitCast(dword, Type::getDoubleTy(ctx), "DWordToFP64BitCast");
+	return fp64;
 }
 
 void RegisterTracker::flush()

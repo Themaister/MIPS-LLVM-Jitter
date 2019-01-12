@@ -13,8 +13,16 @@ public:
 	llvm::Value *get_argument();
 	void write_int(unsigned index, llvm::Value *value);
 	llvm::Value *read_int(unsigned index);
-	void write_float(unsigned index, llvm::Value *value);
-	llvm::Value *read_float(unsigned index);
+
+	void write_fp_s(unsigned index, llvm::Value *value);
+	void write_fp_d(unsigned index, llvm::Value *value);
+	void write_fp_w(unsigned index, llvm::Value *value);
+	void write_fp_l(unsigned index, llvm::Value *value);
+	llvm::Value *read_fp_s(unsigned index);
+	llvm::Value *read_fp_d(unsigned index);
+	llvm::Value *read_fp_w(unsigned index);
+	llvm::Value *read_fp_l(unsigned index);
+
 	void flush();
 	void invalidate();
 	std::string get_twine(unsigned index);

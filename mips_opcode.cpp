@@ -20,6 +20,8 @@ bool mips_opcode_is_branch(Op op)
 	case Op::BGEZ:
 	case Op::BLTZAL:
 	case Op::BGEZAL:
+	case Op::BC1F:
+	case Op::BC1T:
 		return true;
 
 	default:
@@ -39,6 +41,8 @@ bool mips_opcode_ends_basic_block(Op op)
 	case Op::BGTZ:
 	case Op::BLTZ:
 	case Op::BGEZ:
+	case Op::BC1F:
+	case Op::BC1T:
 	case Op::BREAK:
 	case Op::Invalid:
 		return true;
@@ -453,6 +457,11 @@ MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 		instr.imm = imm16;
 		break;
 
+	case 0x1f:
+		if (low_op == 0x3b && rd == 29)
+			instr.op = Op::RDHWR_TLS;
+		break;
+
 	case 0x39:
 		instr.op = Op::SWC1;
 		instr.imm = imm16;
@@ -463,11 +472,6 @@ MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 		instr.imm = imm16;
 		break;
 
-	case 0x1f:
-		if (low_op == 0x3b && rd == 29)
-			instr.op = Op::RDHWR_TLS;
-		break;
-
 	case 0x11:
 	{
 		// COP1 - floating point fun!
@@ -475,59 +479,167 @@ MIPSInstruction decode_mips_instruction(uint32_t pc, uint32_t word)
 		uint8_t fd = (word >> 5) & 31;
 		uint8_t fs = (word >> 10) & 31;
 		uint8_t ft = (word >> 15) & 31;
+		enum fmt { FMT_S = 16, FMT_D = 17, FMT_W = 20, FMT_L = 21 };
+		enum fmt3 { FMT3_S = 0, FMT3_D = 1, FMT3_W = 4, FMT3_L = 5 };
+
+		if (fmt == 8)
+		{
+			// Branch instructions.
+			instr.imm = pc + 4 + int16_t(imm16) * 4;
+			instr.op = (word & 0x10000) ? Op::BC1T : Op::BC1F;
+			break;
+		}
 
 		switch (low_op)
 		{
-		case 5:
-			instr.op = fmt == 16 ? Op::FABS_F32 : Op::FABS_F64;
+		case 0:
+			instr.rt = rt;
+			instr.rs = fs;
+			switch (fmt)
+			{
+			case 0:
+				instr.op = Op::MFC1;
+				break;
+
+			case 2:
+				instr.op = Op::CFC1;
+				break;
+
+			case 4:
+				instr.op = Op::MTC1;
+				break;
+
+			case 6:
+				instr.op = Op::CTC1;
+				break;
+
+			case FMT_S:
+				instr.op = Op::ADD_F32;
+				instr.rt = ft;
+				instr.rd = fd;
+				instr.rs = fs;
+				break;
+
+			case FMT_D:
+				instr.op = Op::ADD_F64;
+				instr.rt = ft;
+				instr.rd = fd;
+				instr.rs = fs;
+				break;
+			}
+			break;
+
+		case 0x01:
+			instr.op = fmt == FMT_S ? Op::SUB_F32 : Op::SUB_F64;
+			instr.rt = ft;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x02:
+			instr.op = fmt == FMT_S ? Op::MUL_F32 : Op::MUL_F64;
+			instr.rt = ft;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x03:
+			instr.op = fmt == FMT_S ? Op::DIV_F32 : Op::DIV_F64;
+			instr.rt = ft;
+			instr.rs = fs;
+			instr.rd = fd;
+			break;
+
+		case 0x05:
+			instr.op = fmt == FMT_S ? Op::ABS_F32 : Op::ABS_F64;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x06:
+			instr.op = fmt == FMT_S ? Op::MOV_F32 : Op::MOV_F64;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x07:
+			instr.op = fmt == FMT_S ? Op::NEG_F32 : Op::NEG_F64;
+			instr.rt = ft;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x21:
+			if (fmt == FMT_S)
+				instr.op = Op::CVT_F64_F32;
+			else if (fmt == FMT_W)
+				instr.op = Op::CVT_F64_I32;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x20:
+			if (fmt == FMT_D)
+				instr.op = Op::CVT_F32_F64;
+			else if (fmt == FMT_S)
+				instr.op = Op::CVT_F32_I32;
+			instr.rd = fd;
+			instr.rs = fs;
+			break;
+
+		case 0x24:
+			if (fmt == FMT_S)
+				instr.op = Op::CVT_I32_F32;
+			else if (fmt == FMT_D)
+				instr.op = Op::CVT_I32_F64;
 			instr.rd = fd;
 			instr.rs = fs;
 			break;
 
 		case 0x30:
-			instr.op = fmt == 16 ? Op::COMP_F_F32 : Op::COMP_F_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_F_F32 : Op::COMP_F_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x31:
-			instr.op = fmt == 16 ? Op::COMP_UN_F32 : Op::COMP_UN_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_UN_F32 : Op::COMP_UN_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x32:
-			instr.op = fmt == 16 ? Op::COMP_EQ_F32 : Op::COMP_EQ_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_EQ_F32 : Op::COMP_EQ_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x33:
-			instr.op = fmt == 16 ? Op::COMP_UEQ_F32 : Op::COMP_UEQ_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_UEQ_F32 : Op::COMP_UEQ_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x34:
-			instr.op = fmt == 16 ? Op::COMP_OLT_F32 : Op::COMP_OLT_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_OLT_F32 : Op::COMP_OLT_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x35:
-			instr.op = fmt == 16 ? Op::COMP_ULT_F32 : Op::COMP_ULT_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_ULT_F32 : Op::COMP_ULT_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x36:
-			instr.op = fmt == 16 ? Op::COMP_OLE_F32 : Op::COMP_OLE_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_OLE_F32 : Op::COMP_OLE_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;
 
 		case 0x37:
-			instr.op = fmt == 16 ? Op::COMP_ULE_F32 : Op::COMP_ULE_F64;
+			instr.op = fmt == FMT_S ? Op::COMP_ULE_F32 : Op::COMP_ULE_F64;
 			instr.rs = fs;
 			instr.rt = ft;
 			break;

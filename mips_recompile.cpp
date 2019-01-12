@@ -684,7 +684,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		                             builder.CreateAdd(tracker.read_int(instr.rs),
 		                                               ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)),
 		                                               "LWC1Addr"));
-		tracker.write_float(instr.rt, loaded);
+		tracker.write_fp_w(instr.rt, loaded);
 		break;
 	}
 
@@ -697,13 +697,389 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		create_store32(recompiler, tracker.get_argument(), bb,
 		               builder.CreateAdd(tracker.read_int(instr.rs),
 		                                 ConstantInt::get(Type::getInt32Ty(ctx), int16_t(instr.imm)), "SWAddr"),
-		               tracker.read_float(instr.rt));
+		               tracker.read_fp_w(instr.rt));
 		break;
 	}
 
 	case Op::RDHWR_TLS:
 		tracker.write_int(instr.rt, tracker.read_int(REG_TLS));
 		break;
+
+	case Op::ADD_F32:
+	{
+		auto *added = builder.CreateFAdd(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		tracker.write_fp_s(instr.rd, added);
+		break;
+	}
+
+	case Op::ADD_F64:
+	{
+		auto *added = builder.CreateFAdd(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		tracker.write_fp_d(instr.rd, added);
+		break;
+	}
+
+	case Op::SUB_F32:
+	{
+		auto *subbed = builder.CreateFSub(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		tracker.write_fp_s(instr.rd, subbed);
+		break;
+	}
+
+	case Op::SUB_F64:
+	{
+		auto *subbed = builder.CreateFSub(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		tracker.write_fp_d(instr.rd, subbed);
+		break;
+	}
+
+	case Op::MUL_F32:
+	{
+		auto *mul = builder.CreateFMul(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		tracker.write_fp_s(instr.rd, mul);
+		break;
+	}
+
+	case Op::MUL_F64:
+	{
+		auto *mul = builder.CreateFMul(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		tracker.write_fp_d(instr.rd, mul);
+		break;
+	}
+
+	case Op::MOV_F32:
+		tracker.write_fp_s(instr.rd, tracker.read_fp_s(instr.rs));
+		break;
+
+	case Op::MOV_F64:
+		tracker.write_fp_d(instr.rd, tracker.read_fp_d(instr.rs));
+		break;
+
+	case Op::DIV_F32:
+	{
+		auto *div = builder.CreateFDiv(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		tracker.write_fp_s(instr.rd, div);
+		break;
+	}
+
+	case Op::DIV_F64:
+	{
+		auto *div = builder.CreateFDiv(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		tracker.write_fp_d(instr.rd, div);
+		break;
+	}
+
+	case Op::NEG_F32:
+	{
+		auto *neg = builder.CreateFNeg(tracker.read_fp_s(instr.rs));
+		tracker.write_fp_s(instr.rd, neg);
+		break;
+	}
+
+	case Op::NEG_F64:
+	{
+		auto *neg = builder.CreateFNeg(tracker.read_fp_d(instr.rs));
+		tracker.write_fp_d(instr.rd, neg);
+		break;
+	}
+
+	case Op::ABS_F32:
+	{
+		auto *abs = builder.CreateAnd(tracker.read_fp_w(instr.rs), ConstantInt::get(Type::getInt32Ty(ctx), 0x7fffffffu));
+		tracker.write_fp_w(instr.rd, abs);
+		break;
+	}
+
+	case Op::ABS_F64:
+	{
+		auto *abs = builder.CreateAnd(tracker.read_fp_l(instr.rs), ConstantInt::get(Type::getInt64Ty(ctx), 0x7fffffffffffffffu));
+		tracker.write_fp_l(instr.rd, abs);
+		break;
+	}
+
+	case Op::CVT_F64_F32:
+	{
+		auto *cvt = builder.CreateFPExt(tracker.read_fp_s(instr.rs), Type::getDoubleTy(ctx));
+		tracker.write_fp_d(instr.rd, cvt);
+		break;
+	}
+
+	case Op::CVT_F64_I32:
+	{
+		auto *cvt = builder.CreateSIToFP(tracker.read_fp_s(instr.rs), Type::getDoubleTy(ctx));
+		tracker.write_fp_d(instr.rd, cvt);
+		break;
+	}
+
+	case Op::CVT_F32_F64:
+	{
+		auto *cvt = builder.CreateFPTrunc(tracker.read_fp_d(instr.rs), Type::getFloatTy(ctx));
+		tracker.write_fp_s(instr.rd, cvt);
+		break;
+	}
+
+	case Op::CVT_F32_I32:
+	{
+		auto *cvt = builder.CreateSIToFP(tracker.read_fp_s(instr.rs), Type::getFloatTy(ctx));
+		tracker.write_fp_s(instr.rd, cvt);
+		break;
+	}
+
+	case Op::CVT_I32_F32:
+	{
+		auto *cvt = builder.CreateFPToSI(tracker.read_fp_s(instr.rs), Type::getInt32Ty(ctx));
+		tracker.write_fp_w(instr.rd, cvt);
+		break;
+	}
+
+	case Op::CVT_I32_F64:
+	{
+		auto *cvt = builder.CreateFPToSI(tracker.read_fp_d(instr.rs), Type::getInt32Ty(ctx));
+		tracker.write_fp_w(instr.rd, cvt);
+		break;
+	}
+
+	case Op::COMP_F_F32:
+	case Op::COMP_F_F64:
+	{
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_UN_F32:
+	{
+		auto *cmp = builder.CreateFCmpUNO(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_UN_F64:
+	{
+		auto *cmp = builder.CreateFCmpUNO(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_EQ_F32:
+	{
+		auto *cmp = builder.CreateFCmpOEQ(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_EQ_F64:
+	{
+		auto *cmp = builder.CreateFCmpOEQ(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_UEQ_F32:
+	{
+		auto *cmp = builder.CreateFCmpUEQ(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_UEQ_F64:
+	{
+		auto *cmp = builder.CreateFCmpUEQ(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_OLT_F32:
+	{
+		auto *cmp = builder.CreateFCmpOLT(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_OLT_F64:
+	{
+		auto *cmp = builder.CreateFCmpOLT(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_ULT_F32:
+	{
+		auto *cmp = builder.CreateFCmpULT(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_ULT_F64:
+	{
+		auto *cmp = builder.CreateFCmpULT(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_OLE_F32:
+	{
+		auto *cmp = builder.CreateFCmpOLE(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_OLE_F64:
+	{
+		auto *cmp = builder.CreateFCmpOLE(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_ULE_F32:
+	{
+		auto *cmp = builder.CreateFCmpULE(tracker.read_fp_s(instr.rs), tracker.read_fp_s(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::COMP_ULE_F64:
+	{
+		auto *cmp = builder.CreateFCmpULE(tracker.read_fp_d(instr.rs), tracker.read_fp_d(instr.rt));
+		cmp = builder.CreateSelect(cmp,
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23),
+		                           ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), ~(1u << 23)));
+		masked = builder.CreateOr(masked, cmp);
+		tracker.write_fp_w(FREG_FCSR, masked);
+		break;
+	}
+
+	case Op::BC1F:
+	case Op::BC1T:
+	{
+		auto *masked = builder.CreateAnd(tracker.read_fp_w(FREG_FCSR), ConstantInt::get(Type::getInt32Ty(ctx), 1u << 23));
+		Value *cmp;
+		if (instr.op == Op::BC1T)
+			cmp = builder.CreateICmpNE(masked, ConstantInt::get(Type::getInt32Ty(ctx), 0));
+		else
+			cmp = builder.CreateICmpEQ(masked, ConstantInt::get(Type::getInt32Ty(ctx), 0));
+
+		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
+			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
+		builder.SetInsertPoint(bb);
+		tracker.flush();
+		Address target = instr.imm;
+		BranchInst::Create(recompiler->get_block_for_address(target),
+		                   recompiler->get_block_for_address(addr + 8),
+		                   cmp,
+		                   bb);
+		break;
+	}
+
+	case Op::MFC1:
+	{
+		auto *value = tracker.read_fp_w(instr.rs);
+		tracker.write_int(instr.rt, value);
+		break;
+	}
+
+	case Op::MTC1:
+	{
+		auto *value = tracker.read_int(instr.rt);
+		tracker.write_fp_w(instr.rs, value);
+		break;
+	}
+
+	case Op::CFC1:
+	{
+		Value *value;
+		if (instr.rs == 31)
+			value = tracker.read_fp_w(FREG_FCSR);
+		else
+			value = ConstantInt::get(Type::getInt32Ty(ctx), 0);
+		tracker.write_int(instr.rt, value);
+		break;
+	}
+
+	case Op::CTC1:
+	{
+		if (instr.rs == 31)
+			tracker.write_fp_w(FREG_FCSR, tracker.read_int(instr.rt));
+		break;
+	}
 
 	default:
 		can_do_step_after = false;
@@ -777,6 +1153,8 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 			case Op::BGTZ:
 			case Op::BEQ:
 			case Op::BNE:
+			case Op::BC1T:
+			case Op::BC1F:
 				block.terminator = Terminator::SelectionBranch;
 				block.static_address_targets[0] = instruction.imm;
 				block.static_address_targets[1] = addr + 8;
