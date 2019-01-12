@@ -278,8 +278,9 @@ void MIPS::sigill(Address addr) const noexcept
 
 void MIPS::op_break(Address addr, uint32_t) noexcept
 {
-	exit_pc = addr;
-	longjmp(jump_buffer, static_cast<int>(ExitCondition::ExitBreak));
+	// Not sure what to do here.
+	(void)addr;
+	raise(SIGUSR1);
 }
 
 void MIPS::op_syscall(Address addr, uint32_t) noexcept

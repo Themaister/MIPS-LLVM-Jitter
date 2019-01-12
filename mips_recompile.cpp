@@ -298,8 +298,9 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 		builder.SetInsertPoint(bb_call);
 		Value *values[] = {tracker.get_argument()};
-		builder.CreateCall(call, values);
-		BranchInst::Create(bb_return, bb_call);
+		auto *call_instr = builder.CreateCall(call, values);
+		call_instr->setTailCall(true);
+		builder.CreateRetVoid();
 
 		bb = bb_return;
 		break;
@@ -490,7 +491,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 	{
 		tracker.flush();
 		create_break(recompiler, tracker.get_argument(), bb, addr, instr.imm);
-		can_do_step_after = false;
+		tracker.invalidate();
 		break;
 	}
 
@@ -1142,7 +1143,6 @@ void MIPS::get_block_from_address(Address addr, Block &block)
 				break;
 
 			case Op::JR:
-			case Op::BREAK:
 			case Op::Invalid:
 				block.terminator = Terminator::Exit;
 				break;

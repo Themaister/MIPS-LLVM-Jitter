@@ -133,8 +133,7 @@ public:
 		Invalid = 0,
 		ExitTooDeepStack = 1,
 		ExitTooDeepJumpStack = 2,
-		ExitBreak = 3,
-		JumpToZero = 4
+		JumpToZero = 3
 	};
 
 	struct ExitState

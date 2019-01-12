@@ -43,7 +43,6 @@ bool mips_opcode_ends_basic_block(Op op)
 	case Op::BGEZ:
 	case Op::BC1F:
 	case Op::BC1T:
-	case Op::BREAK:
 	case Op::Invalid:
 		return true;
 
