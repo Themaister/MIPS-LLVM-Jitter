@@ -771,7 +771,8 @@ void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 
 StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 {
-	predict_return(addr, expected_addr);
+	if (expected_addr)
+		predict_return(addr, expected_addr);
 	return call(addr);
 }
 

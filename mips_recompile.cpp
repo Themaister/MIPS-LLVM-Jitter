@@ -252,10 +252,26 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		break;
 
 	case Op::J:
+	{
+		Address target = instr.imm;
 		if (!mips_opcode_is_branch(load_instr(addr + 4).op))
 			recompile_instruction(recompiler, bb, builder, tracker, addr + 4);
 		tracker.flush();
+
+		if (!recompiler->get_block_for_address(target))
+		{
+			// Record a tail call.
+			auto *call = create_call(recompiler, tracker.get_argument(), bb, target, 0);
+			if (call)
+			{
+				Value *values[] = { tracker.get_argument() };
+				builder.SetInsertPoint(bb);
+				auto *call_instr = builder.CreateCall(call, values);
+				call_instr->setTailCall(true);
+			}
+		}
 		break;
+	}
 
 	case Op::JAL:
 	{
@@ -269,7 +285,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		auto *call = create_call(recompiler, tracker.get_argument(), bb, target, addr + 8);
 		if (call)
 		{
-			Value *values[] = {tracker.get_argument()};
+			Value *values[] = { tracker.get_argument() };
 			builder.SetInsertPoint(bb);
 			builder.CreateCall(call, values);
 		}
@@ -1112,7 +1128,7 @@ void MIPS::recompile_basic_block(
 	{
 		BranchInst::Create(recompiler->get_block_for_address(block.static_address_targets[0]), bb);
 	}
-	else if (block.terminator == Terminator::Exit)
+	else if (block.terminator == Terminator::Exit || block.terminator == Terminator::TailCall)
 	{
 		IRBuilder<> builder(bb);
 		builder.CreateRetVoid();

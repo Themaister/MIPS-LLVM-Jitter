@@ -20,12 +20,15 @@ Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb
 
 	}
 
-	Value *values[] = {
-			argument,
-			ConstantInt::get(Type::getInt32Ty(ctx), addr),
-			ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
-	};
-	builder.CreateCall(calls.predict_return, values);
+	if (expected_return)
+	{
+		Value *values[] = {
+				argument,
+				ConstantInt::get(Type::getInt32Ty(ctx), addr),
+				ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
+		};
+		builder.CreateCall(calls.predict_return, values);
+	}
 
 	// Eagerly compile all our call-sites as well, can facilitate inlining! :D
 	JITTIR::Recompiler tmp(&blocks);
@@ -36,8 +39,10 @@ Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb
 	tmp_func.set_backend(this);
 	auto result = tmp.recompile_function(tmp_func, recompiler->get_current_module());
 
-	Value *call_values[] = {argument};
-	builder.CreateCall(result.function, call_values);
+	Value *call_values[] = { argument };
+	auto *call_instr = builder.CreateCall(result.function, call_values);
+	if (!expected_return)
+		call_instr->setTailCall(true);
 	return nullptr;
 #else
 	// Thunk out calls all the time, even when address is static.

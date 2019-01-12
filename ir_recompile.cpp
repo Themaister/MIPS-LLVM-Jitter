@@ -17,7 +17,11 @@ void Recompiler::set_jitter(Jitter *jitter)
 
 llvm::BasicBlock *Recompiler::get_block_for_address(Address addr)
 {
-	return address_to_basic_block.find(addr)->second;
+	auto itr = address_to_basic_block.find(addr);
+	if (itr != end(address_to_basic_block))
+		return itr->second;
+	else
+		return nullptr;
 }
 
 llvm::Function *Recompiler::get_current_function()
@@ -93,9 +97,9 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 
 	for (auto &order : visit_order)
 	{
-		auto *block = llvm::BasicBlock::Create(ctx, to_string(order->block.block_start), func);
+		auto *block = llvm::BasicBlock::Create(ctx, to_string(order->block_start), func);
 		basic_blocks.push_back(block);
-		address_to_basic_block[order->block.block_start] = block;
+		address_to_basic_block[order->block_start] = block;
 	}
 
 	llvm::BranchInst::Create(address_to_basic_block[function.get_entry_address()], entry_bb);
@@ -105,8 +109,8 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 	{
 		auto &meta_block = *visit_order[i];
 		auto *bb = basic_blocks[i];
-		backend->recompile_basic_block(meta_block.block.block_start, meta_block.block.block_end,
-		                               this, meta_block.block, bb, argument);
+		backend->recompile_basic_block(meta_block.block_start, meta_block.block_end,
+		                               this, meta_block, bb, argument);
 	}
 
 	Result result = {};

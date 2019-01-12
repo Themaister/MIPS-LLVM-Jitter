@@ -12,6 +12,7 @@ enum class Terminator
 {
 	DirectBranch, // Direct jump to static address.
 	SelectionBranch, // Branches to one of two possible addresses.
+	TailCall, // DirectBranch can be promoted to a TailCall to avoid unbounded inlining.
 	Exit // Ends function.
 };
 
@@ -23,12 +24,6 @@ struct Block
 	// For DirectBranch and SelectionBranch.
 	Terminator terminator = Terminator::DirectBranch;
 	Address static_address_targets[2] = {};
-};
-
-struct BlockMeta
-{
-	Block block;
-	BlockMeta *targets[2] = {};
 };
 
 class BlockAnalysisBackend
@@ -50,18 +45,18 @@ public:
 		return entry_addr;
 	}
 
-	const std::vector<BlockMeta *> &get_visit_order() const
+	const std::vector<Block *> &get_visit_order() const
 	{
 		return visit_order;
 	}
 
 private:
 	BlockAnalysisBackend *backend = nullptr;
-	std::unordered_map<Address, std::unique_ptr<BlockMeta>> block_map;
-	std::vector<BlockMeta *> visit_order;
+	std::unordered_map<Address, std::unique_ptr<Block>> block_map;
+	std::vector<Block *> visit_order;
 	Address entry_addr = 0;
 
-	BlockMeta *analyze_from_entry_inner(Address addr); // Map out all static execution paths from an address.
+	void analyze_from_entry_inner(Address addr); // Map out all static execution paths from an address.
 	void reset();
 };
 }
