@@ -2,6 +2,8 @@
 
 using namespace llvm;
 
+#define INLINE_LS
+
 namespace JITTIR
 {
 Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr, Address expected_return)
@@ -96,11 +98,60 @@ Value *MIPS::create_jump_indirect(Recompiler *recompiler, Value *argument, Basic
 	return builder.CreateCall(calls.jump_indirect, values, "jump_addr");
 }
 
+#ifdef INLINE_LS
+static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, unsigned shift)
+{
+	auto &ctx = builder.getContext();
+
+	auto *page = builder.CreateLShr(addr, ConstantInt::get(Type::getInt32Ty(ctx), VirtualAddressSpace::PageSizeLog2), "PageIndex");
+
+	Value *page_gep[] = {
+		ConstantInt::get(Type::getInt32Ty(ctx), 0),
+		ConstantInt::get(Type::getInt32Ty(ctx), 2),
+		page,
+	};
+	page = builder.CreateInBoundsGEP(argument, page_gep, "Page");
+	page = builder.CreateLoad(page, "PageLoaded");
+
+	switch (shift)
+	{
+	case 0:
+		page = builder.CreatePointerBitCastOrAddrSpaceCast(page, Type::getInt8PtrTy(ctx), "Page8");
+		break;
+
+	case 1:
+		page = builder.CreatePointerBitCastOrAddrSpaceCast(page, Type::getInt16PtrTy(ctx), "Page16");
+		break;
+
+	case 2:
+		page = builder.CreatePointerBitCastOrAddrSpaceCast(page, Type::getInt32PtrTy(ctx), "Page32");
+		break;
+
+	case 3:
+		page = builder.CreatePointerBitCastOrAddrSpaceCast(page, Type::getInt64PtrTy(ctx), "Page64");
+		break;
+
+	default:
+		break;
+	}
+
+	auto *offset = builder.CreateLShr(addr, ConstantInt::get(Type::getInt32Ty(ctx), shift), "PageOffset");
+	offset = builder.CreateAnd(offset, ConstantInt::get(Type::getInt32Ty(ctx), (VirtualAddressSpace::PageSize >> shift) - 1));
+
+	auto *ptr = builder.CreateInBoundsGEP(page, offset, "PagePtr");
+	return ptr;
+}
+#endif
+
 void MIPS::create_store32(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value)
 {
 	IRBuilder<> builder(bb);
-	auto &ctx = builder.getContext();
 
+#ifdef INLINE_LS
+	auto *ptr = get_pointer(builder, argument, addr, 2);
+	builder.CreateStore(value, ptr);
+#else
+	auto &ctx = builder.getContext();
 	if (!calls.store32)
 	{
 		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
@@ -111,6 +162,7 @@ void MIPS::create_store32(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	Value *values[] = { argument, addr, value };
 	builder.CreateCall(calls.store32, values);
+#endif
 }
 
 void MIPS::create_swl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value)
@@ -152,6 +204,10 @@ void MIPS::create_store16(Recompiler *recompiler, Value *argument, BasicBlock *b
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
+#ifdef INLINE_LS
+	auto *ptr = get_pointer(builder, argument, addr, 1);
+	builder.CreateStore(builder.CreateTrunc(value, Type::getInt16Ty(ctx), "StoreTrunc"), ptr);
+#else
 	if (!calls.store16)
 	{
 		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
@@ -162,6 +218,7 @@ void MIPS::create_store16(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	Value *values[] = { argument, addr, value };
 	builder.CreateCall(calls.store16, values);
+#endif
 }
 
 void MIPS::create_store8(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr, Value *value)
@@ -169,6 +226,10 @@ void MIPS::create_store8(Recompiler *recompiler, Value *argument, BasicBlock *bb
 	IRBuilder<> builder(bb);
 	auto &ctx = builder.getContext();
 
+#ifdef INLINE_LS
+	auto *ptr = get_pointer(builder, argument, addr, 0);
+	builder.CreateStore(builder.CreateTrunc(value, Type::getInt8Ty(ctx), "StoreTrunc"), ptr);
+#else
 	if (!calls.store8)
 	{
 		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
@@ -179,6 +240,7 @@ void MIPS::create_store8(Recompiler *recompiler, Value *argument, BasicBlock *bb
 
 	Value *values[] = { argument, addr, value };
 	builder.CreateCall(calls.store8, values);
+#endif
 }
 
 Value *MIPS::create_lwl(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *old_value, Value *addr)
@@ -218,8 +280,12 @@ Value *MIPS::create_lwr(Recompiler *recompiler, Value *argument, BasicBlock *bb,
 Value *MIPS::create_load32(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr)
 {
 	IRBuilder<> builder(bb);
-	auto &ctx = builder.getContext();
 
+#ifdef INLINE_LS
+	auto *ptr = get_pointer(builder, argument, addr, 2);
+	return builder.CreateLoad(ptr, "Loaded");
+#else
+	auto &ctx = builder.getContext();
 	if (!calls.load32)
 	{
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx) };
@@ -230,13 +296,18 @@ Value *MIPS::create_load32(Recompiler *recompiler, Value *argument, BasicBlock *
 
 	Value *values[] = { argument, addr };
 	return builder.CreateCall(calls.load32, values);
+#endif
 }
 
 Value *MIPS::create_load16(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr)
 {
 	IRBuilder<> builder(bb);
-	auto &ctx = builder.getContext();
 
+#ifdef INLINE_LS
+	auto *ptr = get_pointer(builder, argument, addr, 1);
+	return builder.CreateLoad(ptr, "Loaded");
+#else
+	auto &ctx = builder.getContext();
 	if (!calls.load16)
 	{
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx) };
@@ -247,13 +318,18 @@ Value *MIPS::create_load16(Recompiler *recompiler, Value *argument, BasicBlock *
 
 	Value *values[] = { argument, addr };
 	return builder.CreateCall(calls.load16, values);
+#endif
 }
 
 Value *MIPS::create_load8(Recompiler *recompiler, Value *argument, BasicBlock *bb, Value *addr)
 {
 	IRBuilder<> builder(bb);
-	auto &ctx = builder.getContext();
 
+#ifdef INLINE_LS
+	auto *ptr = get_pointer(builder, argument, addr, 0);
+	return builder.CreateLoad(ptr, "Loaded");
+#else
+	auto &ctx = builder.getContext();
 	if (!calls.load8)
 	{
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx) };
@@ -264,6 +340,7 @@ Value *MIPS::create_load8(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	Value *values[] = { argument, addr };
 	return builder.CreateCall(calls.load8, values);
+#endif
 }
 
 void MIPS::create_sigill(Recompiler *recompiler, Value *argument, BasicBlock *bb, Address addr)

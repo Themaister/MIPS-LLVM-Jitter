@@ -2,6 +2,7 @@
 
 #include "jitter.hpp"
 #include "ir_function.hpp"
+#include "linuxvm.hpp"
 
 namespace JITTIR
 {
@@ -24,7 +25,7 @@ struct VirtualMachineState
 	enum { MaxIntegerRegisters = 64, MaxFloatRegisters = 64 };
 	int32_t scalar_registers[MaxIntegerRegisters] = {};
 	int32_t float_registers[MaxFloatRegisters] = {}; // Stored as raw 32-bit, rely on bitcast as needed.
-	void *virtual_pages[1u << (32u - 12u)] = {};
+	void *virtual_pages[VirtualAddressSpace::PageCount] = {};
 };
 
 class Recompiler

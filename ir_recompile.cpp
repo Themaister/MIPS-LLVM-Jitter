@@ -69,7 +69,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		auto *float_register_array = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx),
 		                                                  VirtualMachineState::MaxFloatRegisters);
 		auto *page_array = llvm::ArrayType::get(llvm::PointerType::get(llvm::Type::getVoidTy(ctx), 0),
-		                                        1u << (32u - 12u));
+		                                        VirtualAddressSpace::PageCount);
 		llvm::Type *struct_types[] = { int_register_array, float_register_array, page_array };
 		argument_type = llvm::StructType::create(struct_types);
 		argument_type = llvm::PointerType::get(argument_type, 0);

@@ -9,7 +9,7 @@ namespace JITTIR
 class VirtualAddressSpace
 {
 public:
-	enum { PageSize = 0x1000 };
+	enum { PageSize = 0x1000, PageSizeLog2 = 12, PageCount = 1u << (32 - PageSizeLog2) };
 	void set_page(uint32_t page, void *data);
 
 	uint32_t brk(uint32_t addr);
