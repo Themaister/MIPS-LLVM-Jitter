@@ -5,7 +5,7 @@
 
 using namespace llvm;
 
-#define LS_DEBUG
+//#define LS_DEBUG
 //#define STEP_DEBUG
 
 #ifdef STEP_DEBUG
@@ -806,7 +806,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::CVT_F64_I32:
 	{
-		auto *cvt = builder.CreateSIToFP(tracker.read_fp_s(instr.rs), Type::getDoubleTy(ctx));
+		auto *cvt = builder.CreateSIToFP(tracker.read_fp_w(instr.rs), Type::getDoubleTy(ctx));
 		tracker.write_fp_d(instr.rd, cvt);
 		break;
 	}
@@ -820,7 +820,7 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 
 	case Op::CVT_F32_I32:
 	{
-		auto *cvt = builder.CreateSIToFP(tracker.read_fp_s(instr.rs), Type::getFloatTy(ctx));
+		auto *cvt = builder.CreateSIToFP(tracker.read_fp_w(instr.rs), Type::getFloatTy(ctx));
 		tracker.write_fp_s(instr.rd, cvt);
 		break;
 	}

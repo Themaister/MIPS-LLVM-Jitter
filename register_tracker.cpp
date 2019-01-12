@@ -43,11 +43,9 @@ Value *RegisterTracker::read_int(unsigned index)
 
 void RegisterTracker::write_fp_w(unsigned index, Value *value)
 {
-	if (index != 0)
-	{
-		float_registers[index] = value;
-		dirty_float |= 1u << index;
-	}
+	assert(value);
+	float_registers[index] = value;
+	dirty_float |= 1ull << index;
 }
 
 Value *RegisterTracker::read_fp_w(unsigned index)
@@ -63,6 +61,7 @@ Value *RegisterTracker::read_fp_w(unsigned index)
 
 void RegisterTracker::write_fp_s(unsigned index, Value *value)
 {
+	assert(value);
 	auto &ctx = builder->getContext();
 	auto *word = builder->CreateBitCast(value, Type::getInt32Ty(ctx), "SToWBitCast");
 	write_fp_w(index, word);
@@ -70,6 +69,7 @@ void RegisterTracker::write_fp_s(unsigned index, Value *value)
 
 void RegisterTracker::write_fp_l(unsigned index, Value *dword)
 {
+	assert(dword);
 	auto &ctx = builder->getContext();
 	index &= ~1;
 	write_fp_w(index, builder->CreateTrunc(dword, Type::getInt32Ty(ctx), "TruncTo32Lo"));
@@ -78,6 +78,7 @@ void RegisterTracker::write_fp_l(unsigned index, Value *dword)
 
 void RegisterTracker::write_fp_d(unsigned index, Value *value)
 {
+	assert(value);
 	auto &ctx = builder->getContext();
 	auto *dword = builder->CreateBitCast(value, Type::getInt64Ty(ctx), "SToWBitCast");
 	write_fp_l(index, dword);

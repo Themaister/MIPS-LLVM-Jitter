@@ -7,6 +7,8 @@
 #include "linuxvm.hpp"
 #include <setjmp.h>
 
+//#define DEBUG_CALLSTACK
+
 namespace JITTIR
 {
 enum Registers
