@@ -80,14 +80,53 @@ static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, uint32_t phdr, i
 	}
 }
 
+static void print_help()
+{
+	fprintf(stderr,
+	        "Usage: <ELF> "
+	        "[--help] "
+	        "[--static-lib <lib>] "
+	        "[--static-symbols <lib>] "
+	        "[--dump-llvm <dir>] "
+	        "[--debug-step] "
+	        "[--debug-load-store-registers] "
+	        "[--disable-inline-calls] "
+	        "[--thunk-load-store] "
+	        "\n");
+}
+
 int main(int argc, char **argv)
 {
 	CLICallbacks cbs;
+
+	MIPS::Options opts;
 
 	std::string static_lib;
 	std::string static_symbols;
 	std::string mips_binary;
 	std::string llvm_dir;
+
+	cbs.add("--help", [&](CLIParser &parser) {
+		print_help();
+		parser.end();
+	});
+
+	cbs.add("--debug-load-store-registers", [&](CLIParser &) {
+		opts.debug_load_store_registers = true;
+		opts.inline_load_store = false;
+	});
+
+	cbs.add("--thunk-load-store", [&](CLIParser &) {
+		opts.inline_load_store = false;
+	});
+
+	cbs.add("--disable-inline-calls", [&](CLIParser &) {
+		opts.inline_static_address_calls = false;
+	});
+
+	cbs.add("--debug-step", [&](CLIParser &) {
+		opts.debug_step = true;
+	});
 
 	cbs.add("--static-lib", [&](CLIParser &parser) {
 		static_lib = parser.next_string();
@@ -107,7 +146,10 @@ int main(int argc, char **argv)
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
+	{
+		print_help();
 		return 1;
+	}
 	else if (parser.is_ended_state())
 		return 0;
 
