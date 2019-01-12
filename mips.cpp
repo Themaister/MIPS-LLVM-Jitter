@@ -60,6 +60,8 @@ static const char *register_names[] = {
 
 MIPS::MIPS()
 {
+	addr_space.set_pages(virtual_pages);
+
 	jitter.add_external_symbol("__recompiler_call_addr", __recompiler_call_addr);
 	jitter.add_external_symbol("__recompiler_predict_return", __recompiler_predict_return);
 	jitter.add_external_symbol("__recompiler_jump_indirect", __recompiler_jump_indirect);
@@ -237,7 +239,7 @@ void MIPS::step() noexcept
 
 void MIPS::step_after() noexcept
 {
-	for (int i = 0; i < RegisterState::MaxIntegerRegisters; i++)
+	for (int i = 0; i < VirtualMachineState::MaxIntegerRegisters; i++)
 	{
 		if (old_state.scalar_registers[i] != scalar_registers[i])
 		{
@@ -858,7 +860,7 @@ void MIPS::set_external_ir_dump_directory(const std::string &dir)
 	llvm_dump_dir = dir;
 }
 
-void MIPS::set_external_symbol(Address addr, void (*symbol)(RegisterState *))
+void MIPS::set_external_symbol(Address addr, void (*symbol)(VirtualMachineState *))
 {
 	blocks.emplace(addr, symbol);
 	jitter.add_external_symbol(std::string("_") + std::to_string(addr), symbol);
@@ -868,6 +870,12 @@ MIPS::~MIPS()
 {
 	if (!llvm_dump_dir.empty())
 		dump_symbol_addresses(llvm_dump_dir + "/addr.bin");
+}
+
+// Sizeof MIPS is way too big to have on stack due to the page tables.
+std::unique_ptr<MIPS> MIPS::create()
+{
+	return std::unique_ptr<MIPS>(new MIPS);
 }
 }
 

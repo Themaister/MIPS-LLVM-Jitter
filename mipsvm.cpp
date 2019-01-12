@@ -111,7 +111,7 @@ int main(int argc, char **argv)
 	else if (parser.is_ended_state())
 		return 0;
 
-	MIPS mips;
+	auto mips = MIPS::create();
 
 	if (mips_binary.empty())
 	{
@@ -120,7 +120,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!llvm_dir.empty())
-		mips.set_external_ir_dump_directory(llvm_dir);
+		mips->set_external_ir_dump_directory(llvm_dir);
 
 	void *dylib = nullptr;
 	if (!static_lib.empty())
@@ -152,9 +152,9 @@ int main(int argc, char **argv)
 		while (fread(&addr, sizeof(addr), 1, f) == 1)
 		{
 			std::string sym = "_" + std::to_string(addr);
-			auto *callable = (void (*)(RegisterState *)) dlsym(dylib, sym.c_str());
+			auto *callable = (void (*)(VirtualMachineState *)) dlsym(dylib, sym.c_str());
 			if (callable)
-				mips.set_external_symbol(addr, callable);
+				mips->set_external_symbol(addr, callable);
 			else
 				fprintf(stderr, "Could not find symbol: %s\n", sym.c_str());
 		}
@@ -164,16 +164,16 @@ int main(int argc, char **argv)
 
 	Elf32_Ehdr ehdr;
 	uint32_t phdr;
-	if (!load_elf(mips_binary.c_str(), ehdr, mips.get_address_space(), mips.get_symbol_table(),
-	              mips.scalar_registers[REG_TLS], phdr))
+	if (!load_elf(mips_binary.c_str(), ehdr, mips->get_address_space(), mips->get_symbol_table(),
+	              mips->scalar_registers[REG_TLS], phdr))
 		return 1;
 
-	setup_abi_stack(mips, ehdr, phdr, argc, argv);
+	setup_abi_stack(*mips, ehdr, phdr, argc, argv);
 
 	Address addr = ehdr.e_entry;
 	for (;;)
 	{
-		auto result = mips.enter(addr);
+		auto result = mips->enter(addr);
 		switch (result.condition)
 		{
 		case MIPS::ExitCondition::ExitTooDeepJumpStack:

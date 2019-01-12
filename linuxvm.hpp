@@ -10,7 +10,6 @@ class VirtualAddressSpace
 {
 public:
 	enum { PageSize = 0x1000 };
-	VirtualAddressSpace();
 	void set_page(uint32_t page, void *data);
 
 	uint32_t brk(uint32_t addr);
@@ -32,8 +31,13 @@ public:
 		return pages[page];
 	}
 
+	void set_pages(void **pages)
+	{
+		this->pages = pages;
+	}
+
 private:
-	std::vector<void *> pages;
+	void **pages;
 	uint32_t last_page = 1;
 	uint32_t first_page = UINT32_MAX / PageSize;
 	uint32_t brk_page = 0;

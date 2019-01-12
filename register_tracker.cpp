@@ -53,7 +53,7 @@ Value *RegisterTracker::read_fp_w(unsigned index)
 	if (float_registers[index])
 		return float_registers[index];
 
-	auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index + RegisterState::MaxIntegerRegisters,
+	auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, index + VirtualMachineState::MaxIntegerRegisters,
 	                                                std::string("FReg") + std::to_string(index) + "Ptr");
 	float_registers[index] = builder->CreateLoad(ptr, std::string("FReg") + std::to_string(index) + "Loaded");
 	return float_registers[index];
@@ -115,7 +115,7 @@ Value *RegisterTracker::read_fp_d(unsigned index)
 
 void RegisterTracker::flush()
 {
-	for (int i = 0; i < RegisterState::MaxIntegerRegisters; i++)
+	for (int i = 0; i < VirtualMachineState::MaxIntegerRegisters; i++)
 	{
 		if (dirty_int & (1ull << i))
 		{
@@ -124,11 +124,11 @@ void RegisterTracker::flush()
 		}
 	}
 
-	for (int i = 0; i < RegisterState::MaxFloatRegisters; i++)
+	for (int i = 0; i < VirtualMachineState::MaxFloatRegisters; i++)
 	{
 		if (dirty_float & (1ull << i))
 		{
-			auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, i + RegisterState::MaxIntegerRegisters,
+			auto *ptr = builder->CreateConstInBoundsGEP1_64(arg, i + VirtualMachineState::MaxIntegerRegisters,
 			                                                std::string("FReg") + std::to_string(i) + "Ptr");
 			builder->CreateStore(float_registers[i], ptr);
 		}

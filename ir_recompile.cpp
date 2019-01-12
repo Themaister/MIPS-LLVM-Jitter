@@ -135,12 +135,12 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 
 		for (auto &name : symbols)
 		{
-			auto symbol = (void (*)(RegisterState *)) jitter->get_symbol_address(name);
+			auto symbol = (void (*)(VirtualMachineState *)) jitter->get_symbol_address(name);
 			name.erase(begin(name));
 			blocks->emplace(Address(stoull(name)), symbol);
 		}
 
-		result.call = (void (*)(RegisterState *)) jitter->get_symbol_address(entry_symbol);
+		result.call = (void (*)(VirtualMachineState *)) jitter->get_symbol_address(entry_symbol);
 	}
 
 	result.function = func;

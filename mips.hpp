@@ -118,12 +118,12 @@ enum Syscalls
 
 class RegisterTracker;
 
-using StubCallPtr = void (*)(RegisterState *);
+using StubCallPtr = void (*)(VirtualMachineState *);
 
-class MIPS : public JITTIR::RegisterState, public JITTIR::RecompilerBackend, public JITTIR::BlockAnalysisBackend
+class MIPS : public VirtualMachineState, public RecompilerBackend, public BlockAnalysisBackend
 {
 public:
-	MIPS();
+	static std::unique_ptr<MIPS> create();
 	~MIPS();
 	VirtualAddressSpace &get_address_space();
 	SymbolTable &get_symbol_table();
@@ -165,9 +165,10 @@ public:
 	StubCallPtr jump_addr(Address addr) noexcept;
 
 	void set_external_ir_dump_directory(const std::string &dir);
-	void set_external_symbol(Address addr, void (*symbol)(RegisterState *));
+	void set_external_symbol(Address addr, void (*symbol)(VirtualMachineState *));
 
 private:
+	MIPS();
 	VirtualAddressSpace addr_space;
 	SymbolTable symbol_table;
 
@@ -184,7 +185,7 @@ private:
 	unsigned stack_depth = 0;
 	Address exit_pc = 0;
 
-	std::unordered_map<Address, void (*)(RegisterState *)> blocks;
+	std::unordered_map<Address, void (*)(VirtualMachineState *)> blocks;
 	StubCallPtr call(Address addr) noexcept;
 	MIPSInstruction load_instr(Address addr);
 	void recompile_instruction(Recompiler *recompiler, llvm::BasicBlock *&bb,
@@ -255,7 +256,7 @@ private:
 	void syscall_uname();
 	void syscall_readlink();
 
-	RegisterState old_state = {};
+	VirtualMachineState old_state = {};
 
 #ifdef DEBUG_CALLSTACK
 	std::vector<std::string> call_stack_name;

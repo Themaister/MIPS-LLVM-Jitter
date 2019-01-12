@@ -28,11 +28,6 @@ private:
 	std::function<void ()> func;
 };
 
-VirtualAddressSpace::VirtualAddressSpace()
-{
-	pages.resize(1u << (32 - 12));
-}
-
 void VirtualAddressSpace::set_page(uint32_t page, void *data)
 {
 	pages[page] = data;

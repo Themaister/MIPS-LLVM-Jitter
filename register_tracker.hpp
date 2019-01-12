@@ -31,8 +31,8 @@ public:
 private:
 	llvm::IRBuilder<> *builder = nullptr;
 	llvm::Value *arg;
-	llvm::Value *int_registers[RegisterState::MaxIntegerRegisters] = {};
-	llvm::Value *float_registers[RegisterState::MaxFloatRegisters] = {};
+	llvm::Value *int_registers[VirtualMachineState::MaxIntegerRegisters] = {};
+	llvm::Value *float_registers[VirtualMachineState::MaxFloatRegisters] = {};
 	uint64_t dirty_int = 0;
 	uint64_t dirty_float = 0;
 };

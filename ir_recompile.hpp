@@ -19,11 +19,12 @@ public:
 		llvm::Value *arg) = 0;
 };
 
-struct RegisterState
+struct VirtualMachineState
 {
 	enum { MaxIntegerRegisters = 64, MaxFloatRegisters = 64 };
 	int32_t scalar_registers[MaxIntegerRegisters] = {};
 	int32_t float_registers[MaxFloatRegisters] = {}; // Stored as raw 32-bit, rely on bitcast as needed.
+	void *virtual_pages[1u << (32u - 12u)] = {};
 };
 
 class Recompiler
@@ -35,11 +36,11 @@ public:
 	struct Result
 	{
 		Jitter::ModuleHandle handle;
-		void (*call)(RegisterState *);
+		void (*call)(VirtualMachineState *);
 		llvm::Function *function;
 	};
 
-	explicit Recompiler(std::unordered_map<Address, void (*)(RegisterState *)> *blocks_)
+	explicit Recompiler(std::unordered_map<Address, void (*)(VirtualMachineState *)> *blocks_)
 		: blocks(blocks_)
 	{
 	}
@@ -57,6 +58,6 @@ private:
 	llvm::Module *module = nullptr;
 	llvm::Function *function = nullptr;
 
-	std::unordered_map<Address, void (*)(RegisterState *)> *blocks;
+	std::unordered_map<Address, void (*)(VirtualMachineState *)> *blocks;
 };
 }
