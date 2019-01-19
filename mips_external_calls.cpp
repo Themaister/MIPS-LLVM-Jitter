@@ -180,7 +180,7 @@ void MIPS::create_swl(Recompiler *recompiler, Value *argument, BasicBlock *bb, V
 		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
 		calls.swl = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
-		                                   "__recompiler_swl", recompiler->get_current_module());
+		                                   big_endian ? "__recompiler_swl_be" : "__recompiler_swl", recompiler->get_current_module());
 	}
 
 	Value *values[] = { argument, addr, value };
@@ -197,7 +197,7 @@ void MIPS::create_swr(Recompiler *recompiler, Value *argument, BasicBlock *bb, V
 		Type *store_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *store_type = FunctionType::get(Type::getVoidTy(ctx), store_types, false);
 		calls.swr = llvm::Function::Create(store_type, llvm::Function::ExternalLinkage,
-		                                   "__recompiler_swr", recompiler->get_current_module());
+		                                   big_endian ? "__recompiler_swr_be" : "__recompiler_swr", recompiler->get_current_module());
 	}
 
 	Value *values[] = { argument, addr, value };
@@ -264,7 +264,7 @@ Value *MIPS::create_lwl(Recompiler *recompiler, Value *argument, BasicBlock *bb,
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *load_type = FunctionType::get(Type::getInt32Ty(ctx), load_types, false);
 		calls.lwl = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                   "__recompiler_lwl",
+		                                   big_endian ? "__recompiler_lwl_be" : "__recompiler_lwl",
 		                                   recompiler->get_current_module());
 	}
 
@@ -282,7 +282,7 @@ Value *MIPS::create_lwr(Recompiler *recompiler, Value *argument, BasicBlock *bb,
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *load_type = FunctionType::get(Type::getInt32Ty(ctx), load_types, false);
 		calls.lwr = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                   "__recompiler_lwr",
+		                                   big_endian ? "__recompiler_lwr_be" : "__recompiler_lwr",
 		                                   recompiler->get_current_module());
 	}
 

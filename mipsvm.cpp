@@ -33,11 +33,9 @@ static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, const ElfMiscDat
 		{
 			size_t arg_len = strlen(argv[i]) + 1;
 			stack_top -= arg_len;
+			stack_top &= ~3;
 			stack_data.push_back(stack_top);
-
-			// Copy the argument.
-			for (size_t j = 0; j < arg_len; j++)
-				mips.store8(Address(stack_top + j), uint8_t(argv[i][j]));
+			mips.get_address_space().copy_to_user(stack_top, argv[i], arg_len);
 		}
 
 		// Terminate argv

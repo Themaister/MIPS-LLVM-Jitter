@@ -77,20 +77,15 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_step", __recompiler_step);
 	jitter.add_external_symbol("__recompiler_step_after", __recompiler_step_after);
 
-	if (big_endian)
-	{
-		jitter.add_external_symbol("__recompiler_lwl", __recompiler_lwl_be);
-		jitter.add_external_symbol("__recompiler_lwr", __recompiler_lwr_be);
-		jitter.add_external_symbol("__recompiler_swl", __recompiler_swl_be);
-		jitter.add_external_symbol("__recompiler_swr", __recompiler_swr_be);
-	}
-	else
-	{
-		jitter.add_external_symbol("__recompiler_lwl", __recompiler_lwl);
-		jitter.add_external_symbol("__recompiler_lwr", __recompiler_lwr);
-		jitter.add_external_symbol("__recompiler_swl", __recompiler_swl);
-		jitter.add_external_symbol("__recompiler_swr", __recompiler_swr);
-	}
+	jitter.add_external_symbol("__recompiler_lwl_be", __recompiler_lwl_be);
+	jitter.add_external_symbol("__recompiler_lwr_be", __recompiler_lwr_be);
+	jitter.add_external_symbol("__recompiler_swl_be", __recompiler_swl_be);
+	jitter.add_external_symbol("__recompiler_swr_be", __recompiler_swr_be);
+
+	jitter.add_external_symbol("__recompiler_lwl", __recompiler_lwl);
+	jitter.add_external_symbol("__recompiler_lwr", __recompiler_lwr);
+	jitter.add_external_symbol("__recompiler_swl", __recompiler_swl);
+	jitter.add_external_symbol("__recompiler_swr", __recompiler_swr);
 
 	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_EXIT_GROUP] = &MIPS::syscall_exit;
@@ -451,7 +446,7 @@ void MIPS::syscall_write()
 	Address addr = scalar_registers[REG_A1];
 	uint32_t count = scalar_registers[REG_A2];
 	std::vector<uint8_t> output;
-	output.reserve(count);
+	output.resize(count);
 
 	addr_space.copy_from_user(output.data(), addr, count);
 
