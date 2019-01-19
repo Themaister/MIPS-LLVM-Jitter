@@ -819,11 +819,7 @@ void MIPS::syscall_llseek()
 	Address loff_ptr = scalar_registers[REG_A3];
 	int whence = load32(scalar_registers[REG_SP] + 16);
 
-	off64_t off;
-	if (big_endian)
-		off = off64_t((uint64_t(off_lo) << 32) | off_high);
-	else
-		off = off64_t((uint64_t(off_high) << 32) | off_lo);
+	off64_t off = off64_t((uint64_t(off_high) << 32) | off_lo);
 
 	off64_t ret = lseek64(fd, off, whence);
 	if (ret < 0)
