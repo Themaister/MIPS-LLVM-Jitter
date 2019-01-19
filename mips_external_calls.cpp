@@ -104,7 +104,7 @@ static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, un
 	auto &ctx = builder.getContext();
 
 	if (addr_xor)
-		addr = builder.CreateXor(addr, ConstantInt::get(Type::getInt32Ty(ctx), addr_xor));
+		addr = builder.CreateXor(addr, ConstantInt::get(Type::getInt32Ty(ctx), addr_xor), "AddrXorFixup");
 
 	auto *page = builder.CreateLShr(addr, ConstantInt::get(Type::getInt32Ty(ctx), VirtualAddressSpace::PageSizeLog2), "PageIndex");
 
