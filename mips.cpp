@@ -240,22 +240,116 @@ void MIPS::swr(Address addr, uint32_t value) noexcept
 
 uint32_t MIPS::lwl_be(Address addr, uint32_t old_value) const noexcept
 {
-	return lwr(addr, old_value);
+	uint32_t base_addr = addr & ~3;
+	uint32_t addr_offset = addr & 3;
+
+	uint32_t w = load32(base_addr);
+	uint32_t j = (w >> 16) & 0xffu;
+	uint32_t k = (w >> 8) & 0xffu;
+	uint32_t l = (w >> 0) & 0xffu;
+
+	switch (addr_offset)
+	{
+	case 0:
+		return w;
+	case 1:
+		return (j << 24) | (k << 16) | (l << 8) | (old_value & 0xffu);
+	case 2:
+		return (k << 24) | (l << 16) | (old_value & 0xffffu);
+	case 3:
+		return (l << 24) | (old_value & 0xffffffu);
+	}
+
+	return 0;
 }
 
 uint32_t MIPS::lwr_be(Address addr, uint32_t old_value) const noexcept
 {
-	return lwl(addr, old_value);
+	uint32_t base_addr = addr & ~3;
+	uint32_t addr_offset = addr & 3;
+
+	uint32_t w = load32(base_addr);
+	uint32_t i = (w >> 24) & 0xffu;
+	uint32_t j = (w >> 16) & 0xffu;
+	uint32_t k = (w >> 8) & 0xffu;
+
+	switch (addr_offset)
+	{
+	case 0:
+		return (i << 0) | (old_value & 0xffffff00u);
+	case 1:
+		return (i << 8) | (j << 0) | (old_value & 0xffff0000u);
+	case 2:
+		return (i << 16) | (j << 8) | (k << 0) | (old_value & 0xff000000u);
+	case 3:
+		return w;
+	}
+
+	return 0;
 }
 
 void MIPS::swl_be(Address addr, uint32_t value) noexcept
 {
-	swr(addr, value);
+	uint32_t base_addr = addr & ~3;
+	uint32_t addr_offset = addr & 3;
+
+	uint32_t e = (value >> 24) & 0xffu;
+	uint32_t f = (value >> 16) & 0xffu;
+	uint32_t g = (value >> 8) & 0xffu;
+
+	switch (addr_offset)
+	{
+	case 0:
+		store32(base_addr, value);
+		break;
+
+	case 1:
+		store8(base_addr + 1, e);
+		store8(base_addr + 2, f);
+		store8(base_addr + 3, g);
+		break;
+
+	case 2:
+		store8(base_addr + 2, e);
+		store8(base_addr + 3, f);
+		break;
+
+	case 3:
+		store8(base_addr + 3, e);
+		break;
+	}
 }
 
 void MIPS::swr_be(Address addr, uint32_t value) noexcept
 {
-	swl(addr, value);
+	uint32_t base_addr = addr & ~3;
+	uint32_t addr_offset = addr & 3;
+
+	uint32_t f = (value >> 16) & 0xffu;
+	uint32_t g = (value >> 8) & 0xffu;
+	uint32_t h = (value >> 0) & 0xffu;
+
+	switch (addr_offset)
+	{
+	case 0:
+		store8(base_addr, h);
+		break;
+
+	case 1:
+		store8(base_addr, g);
+		store8(base_addr + 1, h);
+		break;
+
+	case 2:
+		store8(base_addr, f);
+		store8(base_addr + 1, g);
+		store8(base_addr + 2, h);
+		break;
+
+	case 3:
+		store32(base_addr, value);
+		break;
+	}
 }
 
 void MIPS::step() noexcept
