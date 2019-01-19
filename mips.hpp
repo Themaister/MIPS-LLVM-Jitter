@@ -141,6 +141,12 @@ public:
 		this->options = options;
 	}
 
+	void set_big_endian(bool enable)
+	{
+		big_endian = enable;
+		addr_space.set_big_endian(enable);
+	}
+
 	static std::unique_ptr<MIPS> create();
 	~MIPS();
 	VirtualAddressSpace &get_address_space();
@@ -166,6 +172,12 @@ public:
 	uint32_t lwr(Address addr, uint32_t old_value) const noexcept;
 	void swl(Address addr, uint32_t value) noexcept;
 	void swr(Address addr, uint32_t value) noexcept;
+
+	uint32_t lwl_be(Address addr, uint32_t old_value) const noexcept;
+	uint32_t lwr_be(Address addr, uint32_t old_value) const noexcept;
+	void swl_be(Address addr, uint32_t value) noexcept;
+	void swr_be(Address addr, uint32_t value) noexcept;
+
 	void step() noexcept;
 	void step_after() noexcept;
 
@@ -189,6 +201,7 @@ private:
 	MIPS();
 	VirtualAddressSpace addr_space;
 	SymbolTable symbol_table;
+	bool big_endian = false;
 
 	void get_block_from_address(Address addr, Block &block) override;
 
@@ -226,6 +239,12 @@ private:
 	llvm::Value *create_lwr(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *old_value, llvm::Value *addr);
 	void create_swl(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *addr, llvm::Value *value);
 	void create_swr(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *addr, llvm::Value *value);
+
+	llvm::Value *create_lwl_be(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *old_value, llvm::Value *addr);
+	llvm::Value *create_lwr_be(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *old_value, llvm::Value *addr);
+	void create_swl_be(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *addr, llvm::Value *value);
+	void create_swr_be(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb, llvm::Value *addr, llvm::Value *value);
+
 	void call_step(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb);
 	void call_step_after(Recompiler *recompiler, llvm::Value *argument, llvm::BasicBlock *bb);
 

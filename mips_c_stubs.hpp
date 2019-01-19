@@ -17,10 +17,17 @@ uint8_t __recompiler_load8(JITTIR::VirtualMachineState *regs, JITTIR::Address ad
 void __recompiler_sigill(JITTIR::VirtualMachineState *regs, JITTIR::Address addr);
 void __recompiler_break(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t code);
 void __recompiler_syscall(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t code);
+
 uint32_t __recompiler_lwl(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t old_value);
 uint32_t __recompiler_lwr(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t old_value);
 void __recompiler_swl(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t value);
 void __recompiler_swr(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t value);
+
+uint32_t __recompiler_lwl_be(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t old_value);
+uint32_t __recompiler_lwr_be(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t old_value);
+void __recompiler_swl_be(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t value);
+void __recompiler_swr_be(JITTIR::VirtualMachineState *regs, JITTIR::Address addr, uint32_t value);
+
 void __recompiler_step(JITTIR::VirtualMachineState *regs);
 void __recompiler_step_after(JITTIR::VirtualMachineState *regs);
 }

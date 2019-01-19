@@ -36,11 +36,17 @@ public:
 		this->pages = pages;
 	}
 
+	void set_big_endian(bool enable)
+	{
+		big_endian = enable;
+	}
+
 private:
 	void **pages;
 	uint32_t last_page = 1;
 	uint32_t first_page = UINT32_MAX / PageSize;
 	uint32_t brk_page = 0;
+	bool big_endian = false;
 };
 
 struct SymbolTable
@@ -49,8 +55,15 @@ struct SymbolTable
 	std::unordered_map<uint32_t, std::string> address_to_symbol;
 };
 
+struct ElfMiscData
+{
+	int32_t tls_base = 0;
+	uint32_t phdr_addr = 0;
+	bool big_endian = false;
+};
+
 bool load_elf(const char *path, Elf32_Ehdr &ehdr_output,
               VirtualAddressSpace &addr_space,
               SymbolTable &symbol_table,
-              int32_t &tls_base, uint32_t &phr_addr);
+              ElfMiscData &misc);
 }

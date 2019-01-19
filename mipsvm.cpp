@@ -6,7 +6,7 @@
 
 using namespace JITTIR;
 
-static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, uint32_t phdr, int argc, char **argv)
+static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, const ElfMiscData &misc, int argc, char **argv)
 {
 	uint32_t stack = mips.get_address_space().allocate_stack(1024 * 1024);
 
@@ -48,7 +48,7 @@ static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, uint32_t phdr, i
 
 		// ELF AUXV (used by musl).
 		stack_data.push_back(AT_PHDR);
-		stack_data.push_back(phdr);
+		stack_data.push_back(misc.phdr_addr);
 		stack_data.push_back(AT_PHENT);
 		stack_data.push_back(ehdr.e_phentsize);
 		stack_data.push_back(AT_PHNUM);
@@ -205,12 +205,13 @@ int main(int argc, char **argv)
 	}
 
 	Elf32_Ehdr ehdr;
-	uint32_t phdr;
-	if (!load_elf(mips_binary.c_str(), ehdr, mips->get_address_space(), mips->get_symbol_table(),
-	              mips->scalar_registers[REG_TLS], phdr))
+	ElfMiscData misc;
+	if (!load_elf(mips_binary.c_str(), ehdr, mips->get_address_space(), mips->get_symbol_table(), misc))
 		return 1;
 
-	setup_abi_stack(*mips, ehdr, phdr, argc, argv);
+	mips->set_big_endian(misc.big_endian);
+	mips->scalar_registers[REG_TLS] = misc.tls_base;
+	setup_abi_stack(*mips, ehdr, misc, argc, argv);
 
 	Address addr = ehdr.e_entry;
 	for (;;)

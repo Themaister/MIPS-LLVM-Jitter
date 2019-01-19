@@ -76,10 +76,21 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_syscall", __recompiler_syscall);
 	jitter.add_external_symbol("__recompiler_step", __recompiler_step);
 	jitter.add_external_symbol("__recompiler_step_after", __recompiler_step_after);
-	jitter.add_external_symbol("__recompiler_lwl", __recompiler_lwl);
-	jitter.add_external_symbol("__recompiler_lwr", __recompiler_lwr);
-	jitter.add_external_symbol("__recompiler_swl", __recompiler_swl);
-	jitter.add_external_symbol("__recompiler_swr", __recompiler_swr);
+
+	if (big_endian)
+	{
+		jitter.add_external_symbol("__recompiler_lwl", __recompiler_lwl_be);
+		jitter.add_external_symbol("__recompiler_lwr", __recompiler_lwr_be);
+		jitter.add_external_symbol("__recompiler_swl", __recompiler_swl_be);
+		jitter.add_external_symbol("__recompiler_swr", __recompiler_swr_be);
+	}
+	else
+	{
+		jitter.add_external_symbol("__recompiler_lwl", __recompiler_lwl);
+		jitter.add_external_symbol("__recompiler_lwr", __recompiler_lwr);
+		jitter.add_external_symbol("__recompiler_swl", __recompiler_swl);
+		jitter.add_external_symbol("__recompiler_swr", __recompiler_swr);
+	}
 
 	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_EXIT_GROUP] = &MIPS::syscall_exit;
@@ -132,12 +143,18 @@ void MIPS::store32(Address addr, uint32_t value) noexcept
 
 void MIPS::store16(Address addr, uint32_t value) noexcept
 {
+	if (big_endian)
+		addr ^= 2;
+
 	auto *ptr = static_cast<uint16_t *>(addr_space.get_page(addr / VirtualAddressSpace::PageSize));
 	ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 1] = uint16_t(value);
 }
 
 void MIPS::store8(Address addr, uint32_t value) noexcept
 {
+	if (big_endian)
+		addr ^= 3;
+
 	auto *ptr = static_cast<uint8_t *>(addr_space.get_page(addr / VirtualAddressSpace::PageSize));
 	ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 0] = uint8_t(value);
 }
@@ -226,6 +243,26 @@ void MIPS::swr(Address addr, uint32_t value) noexcept
 	}
 }
 
+uint32_t MIPS::lwl_be(Address addr, uint32_t old_value) const noexcept
+{
+	return lwr(addr, old_value);
+}
+
+uint32_t MIPS::lwr_be(Address addr, uint32_t old_value) const noexcept
+{
+	return lwl(addr, old_value);
+}
+
+void MIPS::swl_be(Address addr, uint32_t value) noexcept
+{
+	swr(addr, value);
+}
+
+void MIPS::swr_be(Address addr, uint32_t value) noexcept
+{
+	swl(addr, value);
+}
+
 void MIPS::step() noexcept
 {
 	//auto instr = load_instr(scalar_registers[REG_PC]);
@@ -259,6 +296,9 @@ uint32_t MIPS::load32(Address addr) const noexcept
 
 uint16_t MIPS::load16(Address addr) const noexcept
 {
+	if (big_endian)
+		addr ^= 2;
+
 	auto *ptr = static_cast<uint16_t *>(addr_space.get_page(addr / VirtualAddressSpace::PageSize));
 	uint16_t loaded = ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 1];
 	return loaded;
@@ -266,6 +306,9 @@ uint16_t MIPS::load16(Address addr) const noexcept
 
 uint8_t MIPS::load8(Address addr) const noexcept
 {
+	if (big_endian)
+		addr ^= 3;
+
 	auto *ptr = static_cast<uint8_t *>(addr_space.get_page(addr / VirtualAddressSpace::PageSize));
 	uint8_t loaded = ptr[(addr & (VirtualAddressSpace::PageSize - 1)) >> 0];
 	return loaded;
@@ -411,6 +454,7 @@ void MIPS::syscall_write()
 	output.reserve(count);
 
 	addr_space.copy_from_user(output.data(), addr, count);
+
 	scalar_registers[REG_V0] = write(fd, output.data(), count);
 
 	if (scalar_registers[REG_V0] < 0)
@@ -496,8 +540,8 @@ void MIPS::syscall_writev()
 		uint32_t iov_base = load32(addr + 8 * i + 0);
 		uint32_t iov_len = load32(addr + 8 * i + 4);
 		buffers[i].resize(iov_len);
-		for (uint32_t j = 0; j < iov_len; j++)
-			buffers[i][j] = load8(iov_base + j);
+
+		addr_space.copy_from_user(buffers[i].data(), iov_base, iov_len);
 
 		iov[i].iov_base = buffers[i].data();
 		iov[i].iov_len = iov_len;
@@ -597,6 +641,14 @@ void MIPS::syscall_mmap_impl(int page_mult)
 	int fd = load32(scalar_registers[REG_SP] + 16);
 	int off = load32(scalar_registers[REG_SP] + 20) * page_mult;
 
+	if (big_endian && fd >= 0)
+	{
+		// Cannot deal easily with big endian swap for externally visible memory.
+		scalar_registers[REG_A3] = ENOSYS;
+		scalar_registers[REG_V0] = -1;
+		return;
+	}
+
 	if (fd == -1)
 		flags |= MAP_ANONYMOUS;
 	flags &= (MAP_ANONYMOUS | MAP_PRIVATE | MAP_SHARED);
@@ -656,6 +708,7 @@ void MIPS::syscall_uname()
 	{
 		// Assume sizeof on MIPS is the same. It's all chars anyways.
 		addr_space.copy_to_user(scalar_registers[REG_A0], &n, sizeof(n));
+
 		scalar_registers[REG_V0] = 0;
 		scalar_registers[REG_A3] = 0;
 	}
@@ -677,7 +730,11 @@ void MIPS::syscall_llseek()
 	Address loff_ptr = scalar_registers[REG_A3];
 	int whence = load32(scalar_registers[REG_SP] + 16);
 
-	off64_t off = off64_t((uint64_t(off_high) << 32) | off_lo);
+	off64_t off;
+	if (big_endian)
+		off = off64_t((uint64_t(off_lo) << 32) | off_high);
+	else
+		off = off64_t((uint64_t(off_high) << 32) | off_lo);
 
 	off64_t ret = lseek64(fd, off, whence);
 	if (ret < 0)
@@ -690,9 +747,16 @@ void MIPS::syscall_llseek()
 		scalar_registers[REG_V0] = 0;
 		scalar_registers[REG_A3] = 0;
 
-		// Little endian.
-		store32(loff_ptr + 0, ret & 0xffffffffu);
-		store32(loff_ptr + 4, (ret >> 32) & 0xffffffffu);
+		if (big_endian)
+		{
+			store32(loff_ptr + 0, (ret >> 32) & 0xffffffffu);
+			store32(loff_ptr + 4, ret & 0xffffffffu);
+		}
+		else
+		{
+			store32(loff_ptr + 0, ret & 0xffffffffu);
+			store32(loff_ptr + 4, (ret >> 32) & 0xffffffffu);
+		}
 	}
 }
 

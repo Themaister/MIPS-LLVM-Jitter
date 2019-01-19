@@ -86,6 +86,26 @@ void __recompiler_swr(VirtualMachineState *regs, Address addr, uint32_t value)
 	static_cast<MIPS *>(regs)->swr(addr, value);
 }
 
+uint32_t __recompiler_lwl_be(VirtualMachineState *regs, Address addr, uint32_t old_value)
+{
+	return static_cast<MIPS *>(regs)->lwl_be(addr, old_value);
+}
+
+uint32_t __recompiler_lwr_be(VirtualMachineState *regs, Address addr, uint32_t old_value)
+{
+	return static_cast<MIPS *>(regs)->lwr_be(addr, old_value);
+}
+
+void __recompiler_swl_be(VirtualMachineState *regs, Address addr, uint32_t value)
+{
+	static_cast<MIPS *>(regs)->swl_be(addr, value);
+}
+
+void __recompiler_swr_be(VirtualMachineState *regs, Address addr, uint32_t value)
+{
+	static_cast<MIPS *>(regs)->swr_be(addr, value);
+}
+
 void __recompiler_step(VirtualMachineState *regs)
 {
 	static_cast<MIPS *>(regs)->step();

@@ -99,9 +99,12 @@ Value *MIPS::create_jump_indirect(Recompiler *recompiler, Value *argument, Basic
 	return builder.CreateCall(calls.jump_indirect, values, "jump_addr");
 }
 
-static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, unsigned shift)
+static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, unsigned shift, unsigned addr_xor)
 {
 	auto &ctx = builder.getContext();
+
+	if (addr_xor)
+		addr = builder.CreateXor(addr, ConstantInt::get(Type::getInt32Ty(ctx), addr_xor));
 
 	auto *page = builder.CreateLShr(addr, ConstantInt::get(Type::getInt32Ty(ctx), VirtualAddressSpace::PageSizeLog2), "PageIndex");
 
@@ -148,7 +151,7 @@ void MIPS::create_store32(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	if (options.inline_load_store)
 	{
-		auto *ptr = get_pointer(builder, argument, addr, 2);
+		auto *ptr = get_pointer(builder, argument, addr, 2, 0);
 		builder.CreateStore(value, ptr);
 	}
 	else
@@ -208,7 +211,7 @@ void MIPS::create_store16(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	if (options.inline_load_store)
 	{
-		auto *ptr = get_pointer(builder, argument, addr, 1);
+		auto *ptr = get_pointer(builder, argument, addr, 1, big_endian ? 2 : 0);
 		builder.CreateStore(builder.CreateTrunc(value, Type::getInt16Ty(ctx), "StoreTrunc"), ptr);
 	}
 	else
@@ -233,7 +236,7 @@ void MIPS::create_store8(Recompiler *recompiler, Value *argument, BasicBlock *bb
 
 	if (options.inline_load_store)
 	{
-		auto *ptr = get_pointer(builder, argument, addr, 0);
+		auto *ptr = get_pointer(builder, argument, addr, 0, big_endian ? 3 : 0);
 		builder.CreateStore(builder.CreateTrunc(value, Type::getInt8Ty(ctx), "StoreTrunc"), ptr);
 	}
 	else
@@ -261,7 +264,8 @@ Value *MIPS::create_lwl(Recompiler *recompiler, Value *argument, BasicBlock *bb,
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *load_type = FunctionType::get(Type::getInt32Ty(ctx), load_types, false);
 		calls.lwl = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                   "__recompiler_lwl", recompiler->get_current_module());
+		                                   "__recompiler_lwl",
+		                                   recompiler->get_current_module());
 	}
 
 	Value *values[] = { argument, addr, old_value };
@@ -278,7 +282,8 @@ Value *MIPS::create_lwr(Recompiler *recompiler, Value *argument, BasicBlock *bb,
 		Type *load_types[] = { argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx) };
 		auto *load_type = FunctionType::get(Type::getInt32Ty(ctx), load_types, false);
 		calls.lwr = llvm::Function::Create(load_type, llvm::Function::ExternalLinkage,
-		                                   "__recompiler_lwr", recompiler->get_current_module());
+		                                   "__recompiler_lwr",
+		                                   recompiler->get_current_module());
 	}
 
 	Value *values[] = { argument, addr, old_value };
@@ -291,7 +296,7 @@ Value *MIPS::create_load32(Recompiler *recompiler, Value *argument, BasicBlock *
 
 	if (options.inline_load_store)
 	{
-		auto *ptr = get_pointer(builder, argument, addr, 2);
+		auto *ptr = get_pointer(builder, argument, addr, 2, 0);
 		return builder.CreateLoad(ptr, "Loaded");
 	}
 	else
@@ -316,7 +321,7 @@ Value *MIPS::create_load16(Recompiler *recompiler, Value *argument, BasicBlock *
 
 	if (options.inline_load_store)
 	{
-		auto *ptr = get_pointer(builder, argument, addr, 1);
+		auto *ptr = get_pointer(builder, argument, addr, 1, big_endian ? 2 : 0);
 		return builder.CreateLoad(ptr, "Loaded");
 	}
 	else
@@ -341,7 +346,7 @@ Value *MIPS::create_load8(Recompiler *recompiler, Value *argument, BasicBlock *b
 
 	if (options.inline_load_store)
 	{
-		auto *ptr = get_pointer(builder, argument, addr, 0);
+		auto *ptr = get_pointer(builder, argument, addr, 0, big_endian ? 3 : 0);
 		return builder.CreateLoad(ptr, "Loaded");
 	}
 	else
