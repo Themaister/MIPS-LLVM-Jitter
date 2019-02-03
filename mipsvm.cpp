@@ -93,6 +93,7 @@ static void print_help()
 	        "\t[--log-modules]\n"
 	        "\t[--optimize]\n"
 	        "\t[--validate]\n"
+	        "\t[--assume-well-behaved-calls]\n"
 	        "\n");
 }
 int main(int argc, char **argv)
@@ -155,6 +156,10 @@ int main(int argc, char **argv)
 
 	cbs.add("--optimize", [&](CLIParser &) {
 		opts.optimize_modules = true;
+	});
+
+	cbs.add("--assume-well-behaved-calls", [&](CLIParser &) {
+		opts.assume_well_behaved_calls = true;
 	});
 
 	cbs.default_handler = [&](const char *def) {
@@ -258,6 +263,7 @@ int main(int argc, char **argv)
 			break;
 
 		case MIPS::ExitCondition::JumpToZero:
+		case MIPS::ExitCondition::Return:
 			goto end;
 
 		default:

@@ -141,6 +141,10 @@ public:
 
 		bool optimize_modules = false;
 		bool validate_modules = false;
+
+		// Assume that jr $ra always translates to return.
+		// Removes the return stack prediction.
+		bool assume_well_behaved_calls = false;
 	};
 
 	void set_options(const Options &options)
@@ -167,7 +171,8 @@ public:
 		Invalid = 0,
 		ExitTooDeepStack = 1,
 		ExitTooDeepJumpStack = 2,
-		JumpToZero = 3
+		JumpToZero = 3,
+		Return = 4
 	};
 
 	struct ExitState

@@ -900,10 +900,11 @@ MIPS::ExitState MIPS::enter(Address addr) noexcept
 	auto *ptr = call(addr);
 	ptr(this);
 
-	// Should not be reached.
+	// Should not be reached, except for testing code with assume_well_behaved_calls.
 	ExitState state = {};
+	exit_pc = scalar_registers[REG_RA];
 	state.pc = exit_pc;
-	state.condition = ExitCondition::Invalid;
+	state.condition = ExitCondition::Return;
 	return state;
 }
 
@@ -922,37 +923,44 @@ void MIPS::predict_return(Address addr, Address expected_addr) noexcept
 
 StubCallPtr MIPS::call_addr(Address addr, Address expected_addr) noexcept
 {
-	if (expected_addr)
+	if (expected_addr && !options.assume_well_behaved_calls)
 		predict_return(addr, expected_addr);
 	return call(addr);
 }
 
 StubCallPtr MIPS::jump_addr(Address addr) noexcept
 {
-	//fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
-	if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
+	if (options.assume_well_behaved_calls)
 	{
-		//fprintf(stderr, "  Successfully predicted return.\n");
-		return_stack_count--;
-		stack_depth = return_stack_count;
-		return nullptr;
-	}
-	else if (addr == 0)
-	{
-		// Useful for cases where we want to test arbitrary functions and just want it to return to host.
-		exit_pc = addr;
-		longjmp(jump_buffer, static_cast<int>(ExitCondition::JumpToZero));
+		return call(addr);
 	}
 	else
 	{
-		//fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
-		stack_depth++;
-		if (stack_depth > 2048)
+		//fprintf(stderr, "Jumping indirect to 0x%x.\n", addr);
+		if (return_stack_count > 0 && return_stack[return_stack_count - 1] == addr)
 		{
-			exit_pc = addr;
-			longjmp(jump_buffer, static_cast<int>(ExitCondition::ExitTooDeepJumpStack));
+			//fprintf(stderr, "  Successfully predicted return.\n");
+			return_stack_count--;
+			stack_depth = return_stack_count;
+			return nullptr;
 		}
-		return call(addr);
+		else if (addr == 0)
+		{
+			// Useful for cases where we want to test arbitrary functions and just want it to return to host.
+			exit_pc = addr;
+			longjmp(jump_buffer, static_cast<int>(ExitCondition::JumpToZero));
+		}
+		else
+		{
+			//fprintf(stderr, "  Mispredicted return, calling deeper into stack.\n");
+			stack_depth++;
+			if (stack_depth > 2048)
+			{
+				exit_pc = addr;
+				longjmp(jump_buffer, static_cast<int>(ExitCondition::ExitTooDeepJumpStack));
+			}
+			return call(addr);
+		}
 	}
 }
 

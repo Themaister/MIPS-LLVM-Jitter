@@ -11,24 +11,27 @@ Value *MIPS::create_call(Recompiler *recompiler, Value *argument, BasicBlock *bb
 
 	if (options.inline_static_address_calls)
 	{
-		if (!calls.predict_return)
+		if (!options.assume_well_behaved_calls)
 		{
-			Type *types[] = {argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)};
-			auto *function_type = FunctionType::get(Type::getVoidTy(ctx), types, false);
-			calls.predict_return = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
-			                                              "__recompiler_predict_return",
-			                                              recompiler->get_current_module());
+			if (!calls.predict_return)
+			{
+				Type *types[] = {argument->getType(), Type::getInt32Ty(ctx), Type::getInt32Ty(ctx)};
+				auto *function_type = FunctionType::get(Type::getVoidTy(ctx), types, false);
+				calls.predict_return = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+				                                              "__recompiler_predict_return",
+				                                              recompiler->get_current_module());
 
-		}
+			}
 
-		if (expected_return)
-		{
-			Value *values[] = {
-					argument,
-					ConstantInt::get(Type::getInt32Ty(ctx), addr),
-					ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
-			};
-			builder.CreateCall(calls.predict_return, values);
+			if (expected_return)
+			{
+				Value *values[] = {
+						argument,
+						ConstantInt::get(Type::getInt32Ty(ctx), addr),
+						ConstantInt::get(Type::getInt32Ty(ctx), expected_return)
+				};
+				builder.CreateCall(calls.predict_return, values);
+			}
 		}
 
 		// Eagerly compile all our call-sites as well, can facilitate inlining! :D

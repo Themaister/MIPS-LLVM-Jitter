@@ -311,23 +311,26 @@ void MIPS::recompile_instruction(Recompiler *recompiler, BasicBlock *&bb,
 		tracker.set_builder(&builder);
 		tracker.flush();
 
-		auto *call = create_jump_indirect(recompiler, tracker.get_argument(), bb, target);
-		auto *bb_call = BasicBlock::Create(ctx, "IndirectJumpPath", recompiler->get_current_function());
-		auto *bb_return = BasicBlock::Create(ctx, "IndirectJumpReturn", recompiler->get_current_function());
-		builder.SetInsertPoint(bb);
-		builder.CreateCondBr(
-				builder.CreateICmpNE(call,
-				                     ConstantPointerNull::get(static_cast<PointerType *>(call->getType())),
-				                     "jump_addr_cmp"),
-				bb_call, bb_return);
+		if (instr.rs != REG_RA || !options.assume_well_behaved_calls)
+		{
+			auto *call = create_jump_indirect(recompiler, tracker.get_argument(), bb, target);
+			auto *bb_call = BasicBlock::Create(ctx, "IndirectJumpPath", recompiler->get_current_function());
+			auto *bb_return = BasicBlock::Create(ctx, "IndirectJumpReturn", recompiler->get_current_function());
+			builder.SetInsertPoint(bb);
+			builder.CreateCondBr(
+					builder.CreateICmpNE(call,
+					                     ConstantPointerNull::get(static_cast<PointerType *>(call->getType())),
+					                     "jump_addr_cmp"),
+					bb_call, bb_return);
 
-		builder.SetInsertPoint(bb_call);
-		Value *values[] = {tracker.get_argument()};
-		auto *call_instr = builder.CreateCall(call, values);
-		call_instr->setTailCall(true);
-		builder.CreateRetVoid();
+			builder.SetInsertPoint(bb_call);
+			Value *values[] = {tracker.get_argument()};
+			auto *call_instr = builder.CreateCall(call, values);
+			call_instr->setTailCall(true);
+			builder.CreateRetVoid();
+			bb = bb_return;
+		}
 
-		bb = bb_return;
 		break;
 	}
 
