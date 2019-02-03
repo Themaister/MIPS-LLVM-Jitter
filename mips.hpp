@@ -311,4 +311,6 @@ private:
 
 const char *get_scalar_register_name(unsigned index);
 
+std::string address_to_symbol(Address addr);
+
 }

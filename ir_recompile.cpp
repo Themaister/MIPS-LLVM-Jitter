@@ -1,4 +1,5 @@
 #include "ir_recompile.hpp"
+#include "mips.hpp"
 
 using namespace std;
 
@@ -40,11 +41,11 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		this->module = target_module;
 	else
 	{
-		module_ = jitter->create_module(to_string(function.get_entry_address()));
+		module_ = jitter->create_module(address_to_symbol(function.get_entry_address()));
 		this->module = module_.get();
 	}
 	auto &ctx = module->getContext();
-	auto entry_symbol = string("_") + to_string(function.get_entry_address());
+	auto entry_symbol = address_to_symbol(function.get_entry_address());
 
 	if (target_module)
 	{
@@ -108,7 +109,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 
 	for (auto &order : visit_order)
 	{
-		auto *block = llvm::BasicBlock::Create(ctx, to_string(order->block_start), func);
+		auto *block = llvm::BasicBlock::Create(ctx, address_to_symbol(order->block_start), func);
 		basic_blocks.push_back(block);
 		address_to_basic_block[order->block_start] = block;
 	}

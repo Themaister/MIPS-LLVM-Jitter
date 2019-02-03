@@ -994,7 +994,7 @@ void MIPS::set_external_ir_dump_directory(const std::string &dir)
 void MIPS::set_external_symbol(Address addr, void (*symbol)(VirtualMachineState *))
 {
 	blocks.emplace(addr, symbol);
-	jitter.add_external_symbol(std::string("_") + std::to_string(addr), symbol);
+	jitter.add_external_symbol(address_to_symbol(addr), symbol);
 }
 
 MIPS::~MIPS()
@@ -1007,6 +1007,13 @@ MIPS::~MIPS()
 std::unique_ptr<MIPS> MIPS::create()
 {
 	return std::unique_ptr<MIPS>(new MIPS);
+}
+
+std::string address_to_symbol(Address addr)
+{
+	char buffer[10];
+	sprintf(buffer, "_%08x", addr);
+	return std::string(buffer);
 }
 }
 

@@ -211,7 +211,7 @@ int main(int argc, char **argv)
 		Address addr;
 		while (fread(&addr, sizeof(addr), 1, f) == 1)
 		{
-			std::string sym = "_" + std::to_string(addr);
+			std::string sym = address_to_symbol(addr);
 			auto *callable = (void (*)(VirtualMachineState *)) dlsym(dylib, sym.c_str());
 			if (callable)
 				mips->set_external_symbol(addr, callable);
