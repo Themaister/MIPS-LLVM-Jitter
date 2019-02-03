@@ -137,12 +137,17 @@ public:
 
 		// Logs all LLVM modules created to stderr.
 		bool log_modules = false;
+
+		bool optimize_modules = false;
+		bool validate_modules = false;
 	};
 
 	void set_options(const Options &options)
 	{
 		this->options = options;
 		jitter.enable_log_module(options.log_modules);
+		jitter.enable_optimize_module(options.optimize_modules);
+		jitter.enable_validate_module(options.validate_modules);
 	}
 
 	void set_big_endian(bool enable)

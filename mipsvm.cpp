@@ -81,16 +81,18 @@ static void setup_abi_stack(MIPS &mips, const Elf32_Ehdr &ehdr, const ElfMiscDat
 static void print_help()
 {
 	fprintf(stderr,
-	        "Usage: <ELF> "
-	        "[--help] "
-	        "[--static-lib <lib>] "
-	        "[--static-symbols <lib>] "
-	        "[--dump-llvm <dir>] "
-	        "[--debug-step] "
-	        "[--debug-load-store-registers] "
-	        "[--disable-inline-calls] "
-	        "[--thunk-load-store] "
-	        "[--log-modules] "
+	        "Usage: <ELF>\n"
+	        "\t[--help]\n"
+	        "\t[--static-lib <lib>]\n"
+	        "\t[--static-symbols <lib>]\n"
+	        "\t[--dump-llvm <dir>]\n"
+	        "\t[--debug-step]\n"
+	        "\t[--debug-load-store-registers]\n"
+	        "\t[--disable-inline-calls]\n"
+	        "\t[--thunk-load-store]\n"
+	        "\t[--log-modules]\n"
+	        "\t[--optimize]\n"
+	        "\t[--validate]\n"
 	        "\n");
 }
 int main(int argc, char **argv)
@@ -145,6 +147,14 @@ int main(int argc, char **argv)
 
 	cbs.add("--entry", [&](CLIParser &parser) {
 		entry = parser.next_string();
+	});
+
+	cbs.add("--validate", [&](CLIParser &) {
+		opts.validate_modules = true;
+	});
+
+	cbs.add("--optimize", [&](CLIParser &) {
+		opts.optimize_modules = true;
 	});
 
 	cbs.default_handler = [&](const char *def) {

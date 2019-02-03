@@ -50,6 +50,16 @@ public:
 		log_module = enable;
 	}
 
+	void enable_optimize_module(bool enable)
+	{
+		optimize_module = enable;
+	}
+
+	void enable_validate_module(bool enable)
+	{
+		validate_module = enable;
+	}
+
 private:
 #ifdef JITTER_LLVM_VERSION_LEGACY
 	llvm::LLVMContext context;
@@ -76,5 +86,7 @@ private:
 	std::unordered_map<std::string, uint64_t> externals;
 	std::string ir_dump_dir;
 	bool log_module = false;
+	bool optimize_module = false;
+	bool validate_module = false;
 };
 }

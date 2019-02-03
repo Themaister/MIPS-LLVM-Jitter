@@ -1,5 +1,4 @@
 #include "ir_recompile.hpp"
-#include "llvm/IR/Verifier.h"
 
 using namespace std;
 
@@ -126,11 +125,6 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 	}
 
 	Result result = {};
-	if (llvm::verifyFunction(*func, &llvm::errs()))
-	{
-		module->print(llvm::errs(), nullptr);
-		return result;
-	}
 
 	// If we are creating a new module, compile and update symbols here.
 	if (module_)
@@ -143,7 +137,10 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 				continue;
 			symbols.push_back(f.getName());
 		}
+
 		result.handle = jitter->add_module(move(module_));
+		if (!result.handle)
+			return result;
 
 		for (auto &name : symbols)
 		{

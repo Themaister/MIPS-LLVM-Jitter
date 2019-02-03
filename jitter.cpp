@@ -7,7 +7,7 @@
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
-#include <future>
+#include "llvm/IR/Verifier.h"
 
 using namespace llvm;
 using namespace orc;
@@ -122,19 +122,34 @@ Jitter::Jitter()
 
 Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
 {
-	legacy::FunctionPassManager pass_manager(module.get());
-	pass_manager.add(createConstantPropagationPass());
-	pass_manager.add(createInstructionCombiningPass());
-	pass_manager.add(createCFGSimplificationPass());
-	pass_manager.add(createAggressiveDCEPass());
-	pass_manager.add(createLoopSimplifyCFGPass());
-	pass_manager.add(createLICMPass());
-	pass_manager.add(createLoopSinkPass());
-	pass_manager.add(createReassociatePass());
-	pass_manager.add(createNewGVNPass());
-	pass_manager.doInitialization();
-	for (auto &func : *module)
-		pass_manager.run(func);
+	if (validate_module)
+	{
+		for (auto &f : *module)
+		{
+			if (verifyFunction(f, &llvm::errs()))
+			{
+				module->print(llvm::errs(), nullptr);
+				return 0;
+			}
+		}
+	}
+
+	if (optimize_module)
+	{
+		legacy::FunctionPassManager pass_manager(module.get());
+		pass_manager.add(createConstantPropagationPass());
+		pass_manager.add(createInstructionCombiningPass());
+		pass_manager.add(createCFGSimplificationPass());
+		pass_manager.add(createAggressiveDCEPass());
+		pass_manager.add(createLoopSimplifyCFGPass());
+		pass_manager.add(createLICMPass());
+		pass_manager.add(createLoopSinkPass());
+		pass_manager.add(createReassociatePass());
+		pass_manager.add(createNewGVNPass());
+		pass_manager.doInitialization();
+		for (auto &func : *module)
+			pass_manager.run(func);
+	}
 
 	if (!ir_dump_dir.empty())
 	{
