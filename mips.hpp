@@ -134,11 +134,15 @@ public:
 
 		// Aggressively inline and early compile all call paths.
 		bool inline_static_address_calls = true;
+
+		// Logs all LLVM modules created to stderr.
+		bool log_modules = false;
 	};
 
 	void set_options(const Options &options)
 	{
 		this->options = options;
+		jitter.enable_log_module(options.log_modules);
 	}
 
 	void set_big_endian(bool enable)
@@ -299,5 +303,7 @@ private:
 	std::string llvm_dump_dir;
 	void dump_symbol_addresses(const std::string &path) const;
 };
+
+const char *get_scalar_register_name(unsigned index);
 
 }

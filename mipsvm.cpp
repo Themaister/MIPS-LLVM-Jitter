@@ -90,9 +90,9 @@ static void print_help()
 	        "[--debug-load-store-registers] "
 	        "[--disable-inline-calls] "
 	        "[--thunk-load-store] "
+	        "[--log-modules] "
 	        "\n");
 }
-
 int main(int argc, char **argv)
 {
 	CLICallbacks cbs;
@@ -103,6 +103,7 @@ int main(int argc, char **argv)
 	std::string static_symbols;
 	std::string mips_binary;
 	std::string llvm_dir;
+	std::string entry;
 
 	cbs.add("--help", [&](CLIParser &parser) {
 		print_help();
@@ -138,6 +139,14 @@ int main(int argc, char **argv)
 		llvm_dir = parser.next_string();
 	});
 
+	cbs.add("--log-modules", [&](CLIParser &) {
+		opts.log_modules = true;
+	});
+
+	cbs.add("--entry", [&](CLIParser &parser) {
+		entry = parser.next_string();
+	});
+
 	cbs.default_handler = [&](const char *def) {
 		mips_binary = def;
 	};
@@ -152,6 +161,7 @@ int main(int argc, char **argv)
 		return 0;
 
 	auto mips = MIPS::create();
+	mips->set_options(opts);
 
 	if (mips_binary.empty())
 	{
@@ -211,7 +221,22 @@ int main(int argc, char **argv)
 	mips->scalar_registers[REG_TLS] = misc.tls_base;
 	setup_abi_stack(*mips, ehdr, misc, argc, argv);
 
-	Address addr = ehdr.e_entry;
+	Address addr;
+	if (entry.empty())
+		addr = ehdr.e_entry;
+	else
+	{
+		auto &table = mips->get_symbol_table();
+		auto itr = table.symbol_to_address.find(entry);
+		if (itr == table.symbol_to_address.end())
+		{
+			fprintf(stderr, "Failed to find symbol %s in ELF.\n", entry.c_str());
+			return 1;
+		}
+		else
+			addr = itr->second;
+	}
+
 	for (;;)
 	{
 		auto result = mips->enter(addr);
@@ -223,10 +248,17 @@ int main(int argc, char **argv)
 			break;
 
 		case MIPS::ExitCondition::JumpToZero:
-			return 0;
+			goto end;
 
 		default:
 			return 1;
 		}
 	}
+
+end:
+	fprintf(stderr, "Returned to PC 0, treating it as a clean exit.\n");
+	fprintf(stderr, "Scalar registers:\n");
+	for (int i = 1; i < 32; i++)
+		fprintf(stderr, "  %s = %d\n", get_scalar_register_name(i), mips->scalar_registers[i]);
+	return 0;
 }

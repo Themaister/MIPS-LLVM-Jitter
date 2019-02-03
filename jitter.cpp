@@ -136,13 +136,17 @@ Jitter::ModuleHandle Jitter::add_module(std::unique_ptr<Module> module)
 	for (auto &func : *module)
 		pass_manager.run(func);
 
-	fprintf(stderr, "Recompiling module ...\n");
-
 	if (!ir_dump_dir.empty())
 	{
 		std::error_code err;
 		llvm::raw_fd_ostream ostr(ir_dump_dir + "/" + module->getSourceFileName() + ".ll", err);
 		module->print(ostr, nullptr);
+	}
+
+	if (log_module)
+	{
+		fprintf(stderr, "Recompiling module ...\n");
+		module->print(errs(), nullptr);
 	}
 
 	auto K = execution_session->allocateVModule();

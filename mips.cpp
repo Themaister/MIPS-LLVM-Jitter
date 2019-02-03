@@ -58,6 +58,11 @@ static const char *register_names[] = {
 		"pc",
 };
 
+const char *get_scalar_register_name(unsigned index)
+{
+	return register_names[index];
+}
+
 MIPS::MIPS()
 {
 	addr_space.set_pages(virtual_pages);
