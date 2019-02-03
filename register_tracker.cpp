@@ -43,8 +43,8 @@ Value *RegisterTracker::read_int(unsigned index)
 		ConstantInt::get(Type::getInt32Ty(ctx), index),
 	};
 
-	auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string("Reg") + std::to_string(index) + "Ptr");
-	int_registers[index] = builder->CreateLoad(ptr, std::string("Reg") + std::to_string(index) + "Loaded");
+	auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string(get_scalar_register_name(index)) + "Ptr");
+	int_registers[index] = builder->CreateLoad(ptr, std::string(get_scalar_register_name(index)) + "Loaded");
 	return int_registers[index];
 }
 
@@ -140,7 +140,7 @@ void RegisterTracker::flush()
 				ConstantInt::get(Type::getInt32Ty(ctx), i),
 			};
 
-			auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string("Reg") + std::to_string(i) + "Ptr");
+			auto *ptr = builder->CreateInBoundsGEP(arg, indices, std::string(get_scalar_register_name(i)) + "Ptr");
 			builder->CreateStore(int_registers[i], ptr);
 		}
 	}
@@ -172,7 +172,7 @@ void RegisterTracker::invalidate()
 
 std::string RegisterTracker::get_twine(unsigned index)
 {
-	return std::string("Reg") + std::to_string(index) + "_";
+	return get_scalar_register_name(index);
 }
 
 std::string RegisterTracker::get_float_twine(unsigned index)

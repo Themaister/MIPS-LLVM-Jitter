@@ -92,6 +92,7 @@ MIPS::MIPS()
 	jitter.add_external_symbol("__recompiler_swl", __recompiler_swl);
 	jitter.add_external_symbol("__recompiler_swr", __recompiler_swr);
 
+	syscall_table[SYSCALL_SYSCALL] = &MIPS::syscall_syscall;
 	syscall_table[SYSCALL_EXIT] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_EXIT_GROUP] = &MIPS::syscall_exit;
 	syscall_table[SYSCALL_WRITE] = &MIPS::syscall_write;
@@ -437,6 +438,20 @@ void MIPS::op_syscall(Address addr, uint32_t) noexcept
 		syscall_unimplemented();
 		//std::abort();
 	}
+}
+
+void MIPS::syscall_syscall()
+{
+	auto syscall = unsigned(scalar_registers[REG_A0]);
+	syscall -= 4000;
+	if (syscall < SYSCALL_COUNT && syscall_table[syscall])
+	{
+		scalar_registers[REG_A0] = scalar_registers[REG_A1];
+		scalar_registers[REG_A1] = scalar_registers[REG_A2];
+		scalar_registers[REG_A2] = scalar_registers[REG_A3];
+		(this->*syscall_table[syscall])();
+	}
+	// TODO: Deal with generic syscalls which use more than 3 arguments.
 }
 
 void MIPS::syscall_exit()

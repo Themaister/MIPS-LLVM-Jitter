@@ -91,6 +91,7 @@ enum FloatRegisters
 
 enum Syscalls
 {
+	SYSCALL_SYSCALL = 0,
 	SYSCALL_EXIT = 1,
 	SYSCALL_READ = 3,
 	SYSCALL_WRITE = 4,
@@ -282,6 +283,7 @@ private:
 	using SyscallPtr = void (MIPS::*)();
 	SyscallPtr syscall_table[SYSCALL_COUNT] = {};
 	void syscall_exit();
+	void syscall_syscall();
 	void syscall_write();
 	void syscall_open();
 	void syscall_openat();

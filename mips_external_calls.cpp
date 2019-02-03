@@ -139,7 +139,8 @@ static Value *get_pointer(IRBuilder<> &builder, Value *argument, Value *addr, un
 	}
 
 	auto *offset = builder.CreateLShr(addr, ConstantInt::get(Type::getInt32Ty(ctx), shift), "PageOffset");
-	offset = builder.CreateAnd(offset, ConstantInt::get(Type::getInt32Ty(ctx), (VirtualAddressSpace::PageSize >> shift) - 1));
+	offset = builder.CreateAnd(offset, ConstantInt::get(Type::getInt32Ty(ctx), (VirtualAddressSpace::PageSize >> shift) - 1),
+	                           "PageOffsetMasked");
 
 	auto *ptr = builder.CreateInBoundsGEP(page, offset, "PagePtr");
 	return ptr;
