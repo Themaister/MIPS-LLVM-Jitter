@@ -146,8 +146,7 @@ Recompiler::Result Recompiler::recompile_function(Function &function, llvm::Modu
 		for (auto &name : symbols)
 		{
 			auto symbol = (void (*)(VirtualMachineState *)) jitter->get_symbol_address(name);
-			name.erase(begin(name));
-			blocks->emplace(Address(stoull(name)), symbol);
+			blocks->emplace(Address(strtoul(name.c_str() + 1, nullptr, 16)), symbol);
 		}
 
 		result.call = (void (*)(VirtualMachineState *)) jitter->get_symbol_address(entry_symbol);

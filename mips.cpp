@@ -56,6 +56,7 @@ static const char *register_names[] = {
 		"lo",
 		"hi",
 		"pc",
+		"tls",
 };
 
 const char *get_scalar_register_name(unsigned index)
@@ -932,7 +933,13 @@ StubCallPtr MIPS::jump_addr(Address addr) noexcept
 {
 	if (options.assume_well_behaved_calls)
 	{
-		return call(addr);
+		if (addr == 0)
+		{
+			exit_pc = addr;
+			longjmp(jump_buffer, static_cast<int>(ExitCondition::JumpToZero));
+		}
+		else
+			return call(addr);
 	}
 	else
 	{
