@@ -38,6 +38,6 @@ if (${LLVM_VERSION_MAJOR} LESS 8)
     target_compile_definitions(mips-llvm-jitter PUBLIC JITTER_LLVM_VERSION_LEGACY)
 endif()
 
-llvm_map_components_to_libnames(llvm_libs Core Support OrcJIT X86Info X86Utils X86CodeGen X86AsmParser X86AsmPrinter)
+llvm_map_components_to_libnames(llvm_libs Core Support OrcJIT X86Info X86Utils X86CodeGen X86AsmParser)
 target_link_libraries(mips-llvm-jitter PRIVATE ${llvm_libs})
 
